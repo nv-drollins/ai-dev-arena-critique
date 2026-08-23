@@ -300,10 +300,10 @@ async function updateCluster() {
     const mb = document.getElementById('modelBadge');
     if (mb) {
       const short = s => s ? s.split('/').pop() : null;
-      // node sub-lines: "· spark-ce66 · 121/128 GB"
+      // node sub-lines: "└ spark-ce66 · 24 GB" (this model's own footprint on that node)
       const nodeLines = nodes => (nodes || []).map(n =>
         `<div class="model-node">└ ${n.name}` +
-        (n.mem_used_gb != null ? ` · ${n.mem_used_gb}/${n.mem_total_gb} GB` : '') +
+        (n.mem_gb != null ? ` · ${n.mem_gb} GB` : '') +
         `</div>`).join('');
       const block = (icon, m) => {
         if (!m) return '';

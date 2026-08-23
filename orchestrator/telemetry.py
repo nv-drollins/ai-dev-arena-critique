@@ -87,6 +87,29 @@ try:
         out['gpu_util'] = int(first) if first.isdigit() else 0
 except Exception:
     pass
+# Per-process GPU memory so the UI can attribute memory to each MODEL (not just
+# the node total). On GB10: RayWorkerWrapper == a TP shard of the critic (70B),
+# EngineCore/vllm (non-Ray) == the standalone writer. MiB -> bytes.
+out['gpu_procs'] = []
+try:
+    rp = subprocess.run('nvidia-smi --query-compute-apps=pid,used_memory,process_name '
+                        '--format=csv,noheader,nounits'.split(),
+                        capture_output=True, text=True, timeout=6)
+    for row in rp.stdout.strip().split('\n'):
+        cols = [c.strip() for c in row.split(',')]
+        if len(cols) >= 3 and cols[1].isdigit():
+            name = cols[2]
+            if 'RayWorker' in name:
+                role = 'critic'
+            elif 'EngineCore' in name or 'vllm' in name.lower():
+                role = 'writer'
+            else:
+                role = 'other'
+            out['gpu_procs'].append({'pid': cols[0], 'role': role,
+                                     'mem_bytes': int(cols[1]) * 1024 * 1024,
+                                     'name': name})
+except Exception:
+    pass
 print('TELEMETRY ' + json.dumps(out))
 """
 

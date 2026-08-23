@@ -847,35 +847,33 @@ async def get_telemetry():
     served = (data.get("model") or {}).get("served")
     if served:
         data["model"]["display"] = served.split("/")[-1]
-    # Two-model demo: surface both roles + which node(s) each runs on and that
-    # node's memory usage, so the UI can show placement under each model name.
+    # Two-model demo: surface both roles + which node(s) each runs on and how much
+    # GPU memory THAT MODEL uses on THAT node (from per-process nvidia-smi, so the
+    # numbers reflect the model's own footprint — not the node total).
     sparks = data.get("sparks", [])
-    def _node_mem(host_match):
-        """Find a spark by host/role and return (name, used_gb, total_gb)."""
-        for s in sparks:
-            if host_match in (s.get("host"), s.get("role"), s.get("name")):
-                return (s.get("name"), round(s.get("mem_used", 0) / 1e9),
-                        round(s.get("mem_total", 0) / 1e9))
-        return (None, None, None)
 
-    # Writer runs TP=1 on WRITER_HOST_SPARK (the worker). Critic runs TP=2 across
-    # both Sparks (rank 0 on the head). Map each to its node(s)' memory.
-    writer_ip = os.environ.get("WRITER_HOST_SPARK", "192.168.1.149")
-    w_name, w_used, w_tot = _node_mem(writer_ip)
-    if not w_name:  # fall back to the worker role
-        w_name, w_used, w_tot = _node_mem("worker")
-    nodes = [{"name": s.get("name"), "role": s.get("role"),
-              "mem_used_gb": round(s.get("mem_used", 0) / 1e9),
-              "mem_total_gb": round(s.get("mem_total", 0) / 1e9)} for s in sparks]
+    def _model_mem_gb(spark, role):
+        """Sum GPU memory (GB) used by `role` processes on this spark, or None."""
+        procs = [p for p in spark.get("gpu_procs", []) if p.get("role") == role]
+        if not procs:
+            return None
+        return round(sum(p.get("mem_bytes", 0) for p in procs) / 1e9)
+
+    def _nodes_for(role):
+        """List of {name, mem_gb} for every spark actually running `role`."""
+        out = []
+        for s in sparks:
+            gb = _model_mem_gb(s, role)
+            if gb:  # only include nodes where this model is actually resident
+                out.append({"name": s.get("name"), "role": s.get("role"), "mem_gb": gb})
+        return out
+
+    writer_nodes = _nodes_for("writer")
+    critic_nodes = _nodes_for("critic")
     data["models"] = {
-        "writer": {
-            "name": WRITER_MODEL,
-            "nodes": [{"name": w_name, "mem_used_gb": w_used, "mem_total_gb": w_tot}] if w_name else [],
-        },
-        "critic": {
-            "name": CRITIC_MODEL,
-            "nodes": nodes,   # TP=2 spans every Spark
-        } if CRITIC_ENABLED else None,
+        "writer": {"name": WRITER_MODEL, "nodes": writer_nodes},
+        "critic": ({"name": CRITIC_MODEL, "nodes": critic_nodes}
+                   if CRITIC_ENABLED else None),
     }
     return data
 
