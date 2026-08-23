@@ -121,6 +121,14 @@ Design rules:
    land) — if the pinned vLLM image (26.05) doesn't support nemotron_h cleanly,
    options: (a) newer vLLM image, (b) the BF16 writer variant instead of NVFP4,
    (c) fall back to gpt-oss as the writer for the demo.
+   — **TESTED 2026-08-23 on the rig:** the pinned vLLM (`0.20.1.dev`, image 26.05)
+   LOADS the nemotron_h arch (Mamba splitting-ops present, NVFP4 detected) but the
+   plain `…-NVFP4` checkpoint fails at weight-load with
+   `KeyError: 'layers.1.mixer.experts.w2_weight_scale'` (nemotron_h.py:730) — the
+   model's NVFP4 MoE export is slightly ahead of this loader. **Decision:** pull
+   and test the **`…-NVFP4-DSpark`** (Spark-tuned) variant first, then **`…-BF16`**
+   (~60GB, standard weight names → most likely compatible) as the safe fallback.
+   gpt-oss-120b remains the ultimate writer fallback (proven working).
 4. Critic prompt: the exact template that gets *useful* review, not "looks good to me".
 5. Demo timing budget: writer (~20–60s) + critic (~60–120s) — is that the right
    pace for a stage, or do we cap the critic's max_tokens for punchiness?
