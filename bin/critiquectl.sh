@@ -47,12 +47,12 @@ cmd_status() {
 
 # ---- start -----------------------------------------------------------------
 _launch_writer() {
-  local box; box=$(on_writer "docker ps --format '{{.Names}}' | grep -E '^node-[0-9]+\$' | head -1")
-  [ -n "$box" ] || { err "no Ray container on writer $WRITER_HOST_SPARK — start the cluster first"; return 1; }
+  # Writer runs its OWN container (arena-writer, v0.27.1 image) — it does NOT
+  # need the Ray container. launch-writer.sh ssh-hops to WRITER_HOST_SPARK itself.
   if [ -n "$(served_on "$WRITER_SSH" "$WRITER_PORT")" ]; then ok "writer already serving — skip"; return 0; fi
-  c "launching WRITER ($WRITER_SERVED, TP=1) on $WRITER_HOST_SPARK…"
+  c "launching WRITER ($WRITER_SERVED, TP=1, own v0.27.1 container) on $WRITER_HOST_SPARK…"
   on_writer "cd ~/ai-dev-arena-critique && tmux kill-session -t writer 2>/dev/null; \
-    tmux new-session -d -s writer 'bash bin/launch-writer.sh 2>&1 | tee ~/writer.log; sleep 86400'"
+    tmux new-session -d -s writer 'WRITER_HOST_SPARK=$WRITER_HOST_SPARK bash bin/launch-writer.sh 2>&1 | tee ~/writer.log; sleep 86400'"
   _wait_served "$WRITER_SSH" "$WRITER_PORT" "writer"
 }
 _launch_critic() {
@@ -83,12 +83,17 @@ _stop_engine() {  # $1 ssh, $2 label, $3 tmux-session, $4 vllm-match
   "${SSH[@]}" "$1" "tmux kill-session -t $3 2>/dev/null; true"
   ok "$2 stopped"
 }
+_stop_writer() {  # writer is its OWN container (arena-writer) on WRITER_HOST_SPARK
+  c "stopping writer (docker rm arena-writer)…"
+  "${SSH[@]}" "$WRITER_SSH" "docker rm -f arena-writer 2>/dev/null; tmux kill-session -t writer 2>/dev/null; true"
+  ok "writer stopped"
+}
 
 # ---- orchestrator with critic enabled --------------------------------------
 _start_orch() {
   c "starting orchestrator with CRITIC_ENABLED=1 (writer→critic pipeline)…"
   on_head "cd ~/ai-dev-arena-critique && fuser -k $ORCH_PORT/tcp >/dev/null 2>&1; sleep 2; \
-    WRITER_URL=http://localhost:$WRITER_PORT WRITER_MODEL=$WRITER_SERVED \
+    WRITER_URL=http://$WRITER_HOST_SPARK:$WRITER_PORT WRITER_MODEL=$WRITER_SERVED \
     CRITIC_URL=http://localhost:$CRITIC_PORT CRITIC_MODEL=$CRITIC_SERVED \
     CRITIC_ENABLED=1 \
     nohup .venv/bin/uvicorn orchestrator.main:app --host 0.0.0.0 --port $ORCH_PORT \
@@ -114,9 +119,9 @@ case "${1:-help}" in
             both|"") _launch_writer; _launch_critic; _start_orch ;;
             *) err "start: writer|critic|both"; exit 2;; esac ;;
   stop)   case "${2:-both}" in
-            writer) _stop_engine "$WRITER_SSH" writer writer "vllm serve" ;;
+            writer) _stop_writer ;;
             critic) _stop_engine "$HEAD_SSH" critic critic "vllm serve" ;;
-            both|"") _stop_engine "$WRITER_SSH" writer writer "vllm serve"
+            both|"") _stop_writer
                      _stop_engine "$HEAD_SSH" critic critic "vllm serve" ;;
             *) err "stop: writer|critic|both"; exit 2;; esac ;;
   restart) shift; "$0" stop "${1:-both}"; sleep 4; "$0" start "${1:-both}" ;;
