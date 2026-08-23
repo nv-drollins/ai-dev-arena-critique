@@ -114,6 +114,13 @@ Design rules:
    (the current cache has Super-120B + gpt-oss; these two are new downloads).
 3. Does `Llama-3.3-Nemotron-70B-Feedback` want a reasoning parser like Super did?
    (Check its model card / chat template before wiring vLLM.)
+   — **Resolved:** critic arch is plain `LlamaForCausalLM`, BF16, no special parser.
+4. **⚠ Writer arch = `nemotron_h` (hybrid Mamba-Transformer), quant `MIXED_PRECISION`
+   NVFP4.** Config parses fine, but `nemotron_h` in vLLM can be version-sensitive.
+   **Test the actual `vllm serve` of the writer EARLY** (first thing once weights
+   land) — if the pinned vLLM image (26.05) doesn't support nemotron_h cleanly,
+   options: (a) newer vLLM image, (b) the BF16 writer variant instead of NVFP4,
+   (c) fall back to gpt-oss as the writer for the demo.
 4. Critic prompt: the exact template that gets *useful* review, not "looks good to me".
 5. Demo timing budget: writer (~20–60s) + critic (~60–120s) — is that the right
    pace for a stage, or do we cap the critic's max_tokens for punchiness?
