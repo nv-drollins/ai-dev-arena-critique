@@ -514,8 +514,13 @@ RULES:
                 return {"new_app_py": None}
             await asyncio.sleep(3 * attempt)
 
-    raw_content = msg.get("content", "")
-    raw_reasoning = msg.get("reasoning", "")
+    if not msg:                       # all retries failed (defensive; loop returns above)
+        return {"new_app_py": None}
+    # Reasoning models can return content=null with the text in "reasoning".
+    # msg.get("content","") returns None (not "") when the key exists as null,
+    # so coerce explicitly or len() throws "NoneType has no len()".
+    raw_content = msg.get("content") or ""
+    raw_reasoning = msg.get("reasoning") or ""
     content = raw_content if raw_content else raw_reasoning
     print(f"Model response: content={len(raw_content)} reasoning={len(raw_reasoning)} chars, finish={finish_reason}")
     print(f"Content first 400: {content[:400]}")
@@ -842,6 +847,11 @@ async def get_telemetry():
     served = (data.get("model") or {}).get("served")
     if served:
         data["model"]["display"] = served.split("/")[-1]
+    # Two-model demo: surface both roles so the UI badge can show writer + critic.
+    data["models"] = {
+        "writer": WRITER_MODEL,
+        "critic": CRITIC_MODEL if CRITIC_ENABLED else None,
+    }
     return data
 
 

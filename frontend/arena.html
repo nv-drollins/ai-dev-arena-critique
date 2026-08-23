@@ -140,7 +140,7 @@ body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color
       <div class="spark-offline">scanning cluster…</div>
     </div>
     <div class="model-badge">
-      <span class="model-badge-label">ACTIVE MODEL</span>
+      <span class="model-badge-label">MODELS</span>
       <span class="model-badge-value" id="modelBadge">—</span>
     </div>
 
@@ -293,9 +293,15 @@ async function updateCluster() {
     const r = await fetch('/api/telemetry');
     if (!r.ok) return;
     const d = await r.json();
-    // model badge
+    // model badge — two-model demo shows writer + critic; falls back to single served name
     const mb = document.getElementById('modelBadge');
-    if (mb) mb.textContent = (d.model && (d.model.display || d.model.served)) || '—';
+    if (mb) {
+      const short = s => s ? s.split('/').pop() : null;
+      const w = short(d.models && d.models.writer), c = short(d.models && d.models.critic);
+      if (w && c)      mb.innerHTML = `✍️ ${w}<br><span style="font-size:13px;opacity:.85">🔎 ${c}</span>`;
+      else if (w)      mb.textContent = '✍️ ' + w;
+      else             mb.textContent = (d.model && (d.model.display || d.model.served)) || '—';
+    }
     const grid = document.getElementById('sparkGrid');
     if (!grid) return;
     const sparks = d.sparks || [];
