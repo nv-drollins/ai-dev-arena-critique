@@ -129,6 +129,13 @@ Design rules:
    and test the **`…-NVFP4-DSpark`** (Spark-tuned) variant first, then **`…-BF16`**
    (~60GB, standard weight names → most likely compatible) as the safe fallback.
    gpt-oss-120b remains the ultimate writer fallback (proven working).
+   — **DSpark is NOT a standalone model.** Its config is `Qwen3DSparkModel`,
+   6 layers, with `draft_vocab_size`/`eagle_aux_hidden_state_layer_ids`/`dflash_config`
+   → it's a **speculative-decoding DRAFT head** that accelerates a base model, not a
+   writer. Ruled out. **Real fallback path: `…-BF16` (~60GB, downloading).** If BF16
+   also hits a nemotron_h loader issue, the writer becomes **gpt-oss-120b** (proven)
+   and Nemotron is showcased via the critic only — still fully on-message (open
+   NVIDIA model reviewing code, across both Sparks).
 4. Critic prompt: the exact template that gets *useful* review, not "looks good to me".
 5. Demo timing budget: writer (~20–60s) + critic (~60–120s) — is that the right
    pace for a stage, or do we cap the critic's max_tokens for punchiness?
