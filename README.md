@@ -1,12 +1,24 @@
-# ⚡ AI Dev Arena — Trade-Show Demo
+# ⚡ AI Dev Arena — Critique Edition (writer + critic)
 
-**A two-NVIDIA-DGX-Spark "AI software engineer" live demo.** One 120B class model,
-split across two GB10 Sparks (tensor-parallel 2 over the 100GbE link), "solves"
-real coding challenges from a Flask checkout app — live-streamed to three
-displays: the **Arena** scoreboard, the **Code Theater** (files/diff/terminal),
-and the **Operator** console (pick challenge, mode, audience — press Start).
+**A two-NVIDIA-DGX-Spark developer-workflow demo.** A fast **writer** model
+(Nemotron-3.5-Lightning-30B, on one Spark) generates code for real challenges;
+a large **critic** model (Llama-3.3-Nemotron-70B-Feedback, **tensor-parallel
+across BOTH Sparks**) reviews the result live — verdict, findings, and a better
+way to write it. Streamed to three displays: the **Arena** scoreboard, the
+**Code Theater** (files/diff/terminal), and the **Operator** console.
 
-Built and tuned on two real DGX Sparks (Grace Blackwell, GB10). Ships with:
+> **This repo is the critique fork of [`ai-dev-arena`](https://github.com/nv-drollins/spark-cluster-ai-dev).**
+> It's seeded from that single-model project and is being extended into a
+> two-model writer→critic pipeline. See **[docs/CRITIQUE_DESIGN.md](docs/CRITIQUE_DESIGN.md)**
+> for the plan and the open hardware-validation items. The single-model Arena
+> features below still work; the critic layer is under construction.
+
+**What this demo is for:**
+1. **Larger models on clustered Sparks** — the 70B critic spans both boxes.
+2. **The Spark is a developer's machine** — real code gen + review, not a chatbot.
+3. **Open models** — both are NVIDIA open weights (Nemotron); on-prem, nothing leaves the room.
+
+Built and tuned on two real DGX Sparks (Grace Blackwell, GB10). Inherited from the base project:
 
 - **4 challenges** (A/B/C/D) on the same sample app, each with a golden solution
 - **6-category scoring engine** (out of 100) with a live breakdown
@@ -14,10 +26,10 @@ Built and tuned on two real DGX Sparks (Grace Blackwell, GB10). Ships with:
 - **Audience-aware phrasing** (broad / developers / executives)
 - **Real-time cluster gauges** (per-Spark GPU + GPU-memory) + model badge
 - **A terminal demo CLI** — run all four, see live stream + score table
-- **Model hot-swap** script (gpt-oss-120b ↔ Nemotron-3-Super)
 - **Head → worker deploy** over the fast link (worker runs *only* Ray+vLLM)
 
 ---
+
 
 ## Quick start (two Sparks already set up)
 
