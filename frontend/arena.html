@@ -70,7 +70,10 @@ body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color
 .spark-offline { color: var(--muted); font-size: 12px; padding: 12px; }
 .model-badge { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; }
 .model-badge-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); }
-.model-badge-value { font-size: 18px; font-weight: 800; color: var(--accent); letter-spacing: .3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-badge-value { font-size: 15px; font-weight: 400; color: var(--text); letter-spacing: .2px; overflow: hidden; text-overflow: ellipsis; }
+.model-line { font-weight: 400; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.model-line + .model-line, .model-node + .model-line { margin-top: 5px; }
+.model-node { font-size: 11px; color: var(--muted); padding-left: 14px; white-space: nowrap; }
 
 /* Score ring */
 .score-ring { width: 160px; height: 160px; margin: 0 auto 24px; position: relative; }
@@ -293,14 +296,27 @@ async function updateCluster() {
     const r = await fetch('/api/telemetry');
     if (!r.ok) return;
     const d = await r.json();
-    // model badge — two-model demo shows writer + critic; falls back to single served name
+    // model badge — two-model demo: writer + critic, each with its node(s) + memory.
     const mb = document.getElementById('modelBadge');
     if (mb) {
       const short = s => s ? s.split('/').pop() : null;
-      const w = short(d.models && d.models.writer), c = short(d.models && d.models.critic);
-      if (w && c)      mb.innerHTML = `✍️ ${w}<br><span style="font-size:13px;opacity:.85">🔎 ${c}</span>`;
-      else if (w)      mb.textContent = '✍️ ' + w;
-      else             mb.textContent = (d.model && (d.model.display || d.model.served)) || '—';
+      // node sub-lines: "· spark-ce66 · 121/128 GB"
+      const nodeLines = nodes => (nodes || []).map(n =>
+        `<div class="model-node">└ ${n.name}` +
+        (n.mem_used_gb != null ? ` · ${n.mem_used_gb}/${n.mem_total_gb} GB` : '') +
+        `</div>`).join('');
+      const block = (icon, m) => {
+        if (!m) return '';
+        const name = short(m.name || m);   // tolerate old string shape
+        return `<div class="model-line">${icon} ${name}</div>` +
+               nodeLines(m.nodes);
+      };
+      const w = d.models && d.models.writer, c = d.models && d.models.critic;
+      if (w || c) {
+        mb.innerHTML = block('✍️', w) + block('🔎', c);
+      } else {
+        mb.textContent = (d.model && (d.model.display || d.model.served)) || '—';
+      }
     }
     const grid = document.getElementById('sparkGrid');
     if (!grid) return;

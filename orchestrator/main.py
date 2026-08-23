@@ -847,10 +847,35 @@ async def get_telemetry():
     served = (data.get("model") or {}).get("served")
     if served:
         data["model"]["display"] = served.split("/")[-1]
-    # Two-model demo: surface both roles so the UI badge can show writer + critic.
+    # Two-model demo: surface both roles + which node(s) each runs on and that
+    # node's memory usage, so the UI can show placement under each model name.
+    sparks = data.get("sparks", [])
+    def _node_mem(host_match):
+        """Find a spark by host/role and return (name, used_gb, total_gb)."""
+        for s in sparks:
+            if host_match in (s.get("host"), s.get("role"), s.get("name")):
+                return (s.get("name"), round(s.get("mem_used", 0) / 1e9),
+                        round(s.get("mem_total", 0) / 1e9))
+        return (None, None, None)
+
+    # Writer runs TP=1 on WRITER_HOST_SPARK (the worker). Critic runs TP=2 across
+    # both Sparks (rank 0 on the head). Map each to its node(s)' memory.
+    writer_ip = os.environ.get("WRITER_HOST_SPARK", "192.168.1.149")
+    w_name, w_used, w_tot = _node_mem(writer_ip)
+    if not w_name:  # fall back to the worker role
+        w_name, w_used, w_tot = _node_mem("worker")
+    nodes = [{"name": s.get("name"), "role": s.get("role"),
+              "mem_used_gb": round(s.get("mem_used", 0) / 1e9),
+              "mem_total_gb": round(s.get("mem_total", 0) / 1e9)} for s in sparks]
     data["models"] = {
-        "writer": WRITER_MODEL,
-        "critic": CRITIC_MODEL if CRITIC_ENABLED else None,
+        "writer": {
+            "name": WRITER_MODEL,
+            "nodes": [{"name": w_name, "mem_used_gb": w_used, "mem_total_gb": w_tot}] if w_name else [],
+        },
+        "critic": {
+            "name": CRITIC_MODEL,
+            "nodes": nodes,   # TP=2 spans every Spark
+        } if CRITIC_ENABLED else None,
     }
     return data
 
