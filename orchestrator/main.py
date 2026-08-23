@@ -41,9 +41,21 @@ REPOS_DIR = BASE_DIR / "challenge-repos"
 RESULTS_DIR = BASE_DIR / "orchestrator" / "results"
 SESSION_WORK_DIR = BASE_DIR / ".sessions"
 
-# vLLM endpoint (set by spark-stack-start.sh when active)
-VLLM_URL = os.environ.get("VLLM_URL", "http://127.0.0.1:8000")
-MODEL_NAME = os.environ.get("MODEL_NAME", "nvidia/nemotron-3-super")
+# vLLM endpoints.
+# WRITER = fast codegen model (Nemotron-Lightning-30B, one Spark, :8001).
+# CRITIC = large review model (Llama-3.3-Nemotron-70B-Feedback, TP=2 both Sparks, :8002).
+# VLLM_URL / MODEL_NAME kept as the WRITER aliases for back-compat with the
+# inherited single-model code path.
+WRITER_URL = os.environ.get("WRITER_URL", os.environ.get("VLLM_URL", "http://127.0.0.1:8001"))
+WRITER_MODEL = os.environ.get("WRITER_MODEL", os.environ.get("MODEL_NAME", "nemotron-lightning-30b"))
+CRITIC_URL = os.environ.get("CRITIC_URL", "http://127.0.0.1:8002")
+CRITIC_MODEL = os.environ.get("CRITIC_MODEL", "llama33-nemotron-70b-feedback")
+# When false (default until the critic engine is up), the pipeline runs
+# writer→tests→score exactly like the base project and skips the critic call.
+CRITIC_ENABLED = os.environ.get("CRITIC_ENABLED", "0") not in ("0", "", "false", "False")
+# Back-compat aliases (inherited call_llm reads these):
+VLLM_URL = WRITER_URL
+MODEL_NAME = WRITER_MODEL
 
 # --- State ---
 
@@ -386,10 +398,32 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
 
     score = score_session(s)
     s["score"] = score
-    s["status"] = "completed"
+    s["status"] = "reviewing" if CRITIC_ENABLED else "completed"
     s["completed_at"] = time.time()
 
-    await broadcast("completed", "Demo complete!", score=score)
+    # Phase 7: Critique (writer→critic pipeline). Narrative layer on top of the
+    # objective score — the critic gives a verdict + findings but does NOT move
+    # the number. Runs the big 70B model TP=2 across both Sparks (the headline).
+    if CRITIC_ENABLED:
+        await broadcast("critiquing", "Sending to the reviewer (70B, across both Sparks)…",
+                        score=score)
+        try:
+            critique = await run_critic(
+                challenge=challenge,
+                diff=diff_for_scoring,
+                test_results=test_results,
+                on_token=lambda partial: None,  # (streaming hook; wired below)
+                broadcast=broadcast,
+            )
+        except Exception as e:
+            critique = {"verdict": "unavailable", "summary": f"Critic unavailable: {e}",
+                        "findings": [], "error": str(e)[:300]}
+            await broadcast("warning", f"Critic call failed: {e}")
+        s["critique"] = critique
+        s["status"] = "completed"
+        await broadcast("completed", "Review complete!", score=score, critique=critique)
+    else:
+        await broadcast("completed", "Demo complete!", score=score)
 
     return score
 
@@ -510,6 +544,148 @@ RULES:
             print(f"JSON parse error (strategy 2): {e2}")
     print("All JSON parsing strategies failed - returning legacy fallback")
     return {"reasoning_summary": "Failed to parse model response."}
+
+
+# ---- Critic (writer→critic pipeline) ---------------------------------------
+
+CRITIC_SYSTEM = (
+    "You are a senior staff software engineer doing a focused code review. "
+    "You review a proposed change (a git diff) against the task and the test "
+    "results. You are precise, concrete, and kind. You do NOT rewrite the code "
+    "yourself — you give a verdict and a short list of findings. The automated "
+    "test suite is the ground truth for correctness; you add judgment about "
+    "quality, edge cases, and clarity that tests can miss."
+)
+
+
+def _critic_prompt(challenge: dict, diff: str, test_results: list) -> str:
+    tests_passed = all(t.get("passed") for t in test_results if "pytest" in t.get("command", ""))
+    test_summary = "\n".join(
+        f"  [{'PASS' if t.get('passed') else 'FAIL'}] {t.get('command','')}"
+        for t in test_results
+    ) or "  (no tests run)"
+    task = challenge.get("prompt") or challenge.get("description") or challenge.get("title", "")
+    return f"""## Task the developer was given
+{task}
+
+## Automated test results (ground truth for correctness)
+{test_summary}
+Overall: {"ALL TESTS PASS" if tests_passed else "SOME TESTS FAILED"}
+
+## The change under review (git diff)
+```diff
+{diff[:8000] if diff else "(no changes were made)"}
+```
+
+## Your review
+Respond with ONLY a JSON object, no prose outside it:
+{{
+  "verdict": "ship" | "ship-with-nits" | "needs-work",
+  "summary": "one-sentence overall judgment",
+  "findings": [
+    {{"kind": "correctness" | "style" | "spec" | "edge-case",
+      "severity": "info" | "minor" | "major",
+      "note": "specific, actionable observation"}}
+  ],
+  "better_way": "optional: one concrete suggestion for a cleaner/safer approach, or null"
+}}
+
+Rules:
+- If all tests pass and the code is clean, verdict "ship" with 0-2 info findings.
+- Base "correctness" findings on the diff + test results, not speculation.
+- At most 3 findings. Be concrete (name the function/line), never generic.
+- "better_way" is optional and at most 2 sentences."""
+
+
+async def run_critic(challenge, diff, test_results, on_token=None, broadcast=None):
+    """Call the CRITIC model (Llama-3.3-Nemotron-70B-Feedback, TP=2 both Sparks).
+
+    Streams tokens (so the UI shows it 'thinking' instead of a dead freeze),
+    then parses a JSON verdict. Returns a dict:
+      {verdict, summary, findings:[{kind,severity,note}], better_way, raw, elapsed_s}
+    """
+    from aiohttp import ClientSession, TCPConnector
+
+    prompt = _critic_prompt(challenge, diff, test_results)
+    t0 = time.time()
+    collected = []
+    last_beat = 0.0
+
+    async with ClientSession(connector=TCPConnector(limit=10)) as sess:
+        async with sess.post(
+            f"{CRITIC_URL}/v1/chat/completions",
+            json={
+                "model": CRITIC_MODEL,
+                "messages": [
+                    {"role": "system", "content": CRITIC_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                "max_tokens": 1200,
+                "temperature": 0.2,
+                "stream": True,
+            },
+            timeout=600,
+        ) as resp:
+            if resp.status != 200:
+                body = await resp.text()
+                raise RuntimeError(f"critic HTTP {resp.status}: {body[:200]}")
+            async for line in resp.content:
+                if not line:
+                    continue
+                txt = line.decode("utf-8", "ignore").strip()
+                if not txt.startswith("data:"):
+                    continue
+                payload = txt[5:].strip()
+                if payload == "[DONE]":
+                    break
+                try:
+                    delta = json.loads(payload)["choices"][0]["delta"].get("content", "")
+                except Exception:
+                    continue
+                if not delta:
+                    continue
+                collected.append(delta)
+                if on_token:
+                    on_token("".join(collected))
+                # heartbeat to the UI at most ~1/s so the reviewer looks alive
+                now = time.time()
+                if broadcast and (now - last_beat) > 1.0:
+                    last_beat = now
+                    preview = "".join(collected)[-280:]
+                    await broadcast("critiquing", "Reviewer is analysing the change…",
+                                    critique_stream=preview)
+
+    raw = "".join(collected)
+    parsed = _parse_critic_json(raw)
+    parsed["raw"] = raw
+    parsed["elapsed_s"] = round(time.time() - t0, 1)
+    return parsed
+
+
+def _parse_critic_json(raw: str) -> dict:
+    """Best-effort extract the critic's JSON verdict; degrade gracefully to prose."""
+    import re
+    default = {"verdict": "review", "summary": raw.strip()[:200] or "No review produced.",
+               "findings": [], "better_way": None}
+    if not raw:
+        return default
+    # strip code fences
+    m = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not m:
+        return default
+    for candidate in (m.group(0),):
+        try:
+            d = json.loads(candidate)
+            d.setdefault("verdict", "review")
+            d.setdefault("summary", "")
+            d.setdefault("findings", [])
+            d.setdefault("better_way", None)
+            if not isinstance(d["findings"], list):
+                d["findings"] = []
+            return d
+        except Exception:
+            continue
+    return default
 
 
 async def run_validation(work_dir: Path, challenge: dict):

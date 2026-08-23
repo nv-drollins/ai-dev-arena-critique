@@ -165,16 +165,49 @@ body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color
       <div class="section-title" style="margin:20px 0 8px;">🧪 LIVE TEST OUTPUT</div>
       <div id="tests"></div>
     </div>
+    <div class="critique-area" id="critiqueArea" style="display:none; margin-top:18px;">
+      <div class="section-title" style="margin:10px 0 8px;">
+        🔎 CODE REVIEW <span style="opacity:.6; font-size:.8em;">— Llama-3.3-Nemotron-70B, across both Sparks</span>
+      </div>
+      <div id="critiqueVerdict" class="critique-verdict"></div>
+      <div id="critiqueSummary" class="critique-summary"></div>
+      <ul id="critiqueFindings" class="critique-findings"></ul>
+      <div id="critiqueBetter" class="critique-better"></div>
+      <pre id="critiqueStream" class="critique-stream" style="display:none;"></pre>
+    </div>
   </div>
 </div>
+
+<style>
+.critique-verdict{display:inline-block;padding:4px 12px;border-radius:6px;font-weight:700;
+  font-size:14px;letter-spacing:.4px;margin-bottom:8px}
+.critique-verdict.ship{background:#0d3320;color:#4ade80;border:1px solid #166534}
+.critique-verdict.ship-with-nits{background:#33280d;color:#fbbf24;border:1px solid #92660e}
+.critique-verdict.needs-work{background:#330d0d;color:#f87171;border:1px solid #922}
+.critique-verdict.review,.critique-verdict.unavailable{background:#1a2432;color:#93c5fd;border:1px solid #1e3a5f}
+.critique-summary{color:#cbd5e1;font-size:14px;line-height:1.5;margin-bottom:10px}
+.critique-findings{list-style:none;padding:0;margin:0 0 10px}
+.critique-findings li{padding:7px 10px;margin-bottom:6px;border-radius:6px;background:#111a26;
+  border-left:3px solid #334155;font-size:13px;line-height:1.45}
+.critique-findings li.major{border-left-color:#f87171}
+.critique-findings li.minor{border-left-color:#fbbf24}
+.critique-findings li.info{border-left-color:#38bdf8}
+.critique-findings .kind{font-weight:700;text-transform:uppercase;font-size:11px;
+  letter-spacing:.5px;opacity:.8;margin-right:6px}
+.critique-better{color:#a5b4fc;font-size:13px;font-style:italic;border-top:1px dashed #263449;
+  padding-top:8px;margin-top:4px}
+.critique-better:empty{display:none}
+.critique-stream{background:#0a0f16;color:#64748b;font-size:11px;max-height:120px;overflow:auto;
+  padding:8px;border-radius:6px;white-space:pre-wrap;margin-top:8px}
+</style>
 
 <script>
 /* ---- constants ---- */
 const WS = `ws://${location.host}`;
-const PHASES = ['inspecting','planning','calling_llm','editing','testing','completed'];
+const PHASES = ['inspecting','planning','calling_llm','editing','testing','critiquing','completed'];
 const PHASE_MAP = {
   inspecting:'🔍 Inspecting Code', planning:'📋 Planning', calling_llm:'🧠 Thinking...',
-  editing:'✏️ Editing', testing:'🧪 Testing', completed:'🏆 Complete!',
+  editing:'✏️ Editing', testing:'🧪 Testing', critiquing:'🔎 Reviewing', completed:'🏆 Complete!',
   error:'⚠️ Error', warning:'⚡ Fallback Applied'
 };
 const DOTS = document.querySelectorAll('.phase-dot');
@@ -325,8 +358,45 @@ function onEvent(ev) {
     t.appendChild(line); t.scrollTop = t.scrollHeight;
   }
   if (ev.score) { setScore(ev.score); stopTimerAt(ev.elapsed); }
+  // live reviewer stream (heartbeat preview while the 70B thinks)
+  if (ev.critique_stream !== undefined) {
+    document.getElementById('critiqueArea').style.display = 'block';
+    const st = document.getElementById('critiqueStream');
+    st.style.display = 'block';
+    st.textContent = ev.critique_stream;
+    st.scrollTop = st.scrollHeight;
+  }
+  // final structured critique
+  if (ev.critique) renderCritique(ev.critique);
   if (ev.phase === 'completed') stopTimerAt(ev.elapsed);
   if (ev.phase === 'error') stopTimerAt(ev.elapsed);
+}
+
+function renderCritique(c) {
+  document.getElementById('critiqueArea').style.display = 'block';
+  document.getElementById('critiqueStream').style.display = 'none';
+  const verdict = (c.verdict || 'review').toLowerCase();
+  const vEl = document.getElementById('critiqueVerdict');
+  vEl.className = 'critique-verdict ' + verdict;
+  const label = {ship:'✓ SHIP', 'ship-with-nits':'✓ SHIP (nits)',
+                 'needs-work':'✗ NEEDS WORK', review:'REVIEW',
+                 unavailable:'REVIEWER OFFLINE'}[verdict] || verdict.toUpperCase();
+  vEl.textContent = label;
+  document.getElementById('critiqueSummary').textContent = c.summary || '';
+  const ul = document.getElementById('critiqueFindings');
+  ul.innerHTML = '';
+  (c.findings || []).forEach(f => {
+    const li = document.createElement('li');
+    li.className = (f.severity || 'info');
+    const kind = document.createElement('span');
+    kind.className = 'kind';
+    kind.textContent = f.kind || 'note';
+    li.appendChild(kind);
+    li.appendChild(document.createTextNode(f.note || ''));
+    ul.appendChild(li);
+  });
+  const better = document.getElementById('critiqueBetter');
+  better.textContent = c.better_way ? ('💡 ' + c.better_way) : '';
 }
 
 /* ---- onSessionReady shows the UI ---- */
@@ -336,6 +406,18 @@ function resetView() {
   connectMs = null;
   feed.innerHTML = '';
   document.getElementById('tests').innerHTML = '';
+  // clear the critique panel for a fresh run
+  const ca = document.getElementById('critiqueArea');
+  if (ca) {
+    ca.style.display = 'none';
+    document.getElementById('critiqueVerdict').textContent = '';
+    document.getElementById('critiqueVerdict').className = 'critique-verdict';
+    document.getElementById('critiqueSummary').textContent = '';
+    document.getElementById('critiqueFindings').innerHTML = '';
+    document.getElementById('critiqueBetter').textContent = '';
+    const cs = document.getElementById('critiqueStream');
+    cs.textContent = ''; cs.style.display = 'none';
+  }
   // Reset phase dots + name
   DOTS.forEach(dot => dot.classList.remove('active', 'done'));
   const ph = document.getElementById('phName');
