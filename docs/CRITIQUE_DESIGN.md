@@ -1,15 +1,28 @@
 # CRITIQUE_DESIGN.md — writer + critic on two DGX Sparks
 
-> Status: **DESIGN / scaffolding**. This repo is seeded from `ai-dev-arena`
-> (single-model). This doc captures the plan for the two-model pipeline before
-> the build. Nothing here is load-tested on hardware yet — items marked
-> **⚠ VALIDATE** must be proven on the real Sparks before the demo.
+> Status: **CRITIC VALIDATED ON HARDWARE (2026-08-23).** The 70B critic runs
+> tensor-parallel across both Sparks and produces real code reviews. Writer model
+> selection is being finalized (plain NVFP4 fails on the pinned vLLM; BF16 pending).
+
+## 0. Hardware validation results (2026-08-23, on the two-Spark rig)
+
+| Item | Result |
+|---|---|
+| **Critic loads TP=2 across both Sparks** | ✅ `llama33-nemotron-70b-feedback` serving on :8002; Ray worker rank connected from 192.168.100.11 over the 100GbE link |
+| **Critic produces usable reviews** | ✅ verdict `ship-with-nits` + 2 real findings (missing input validation, clarity) that the tests don't catch + a concrete better-way. Clean JSON (fenced). |
+| **Critic review latency** | ⏱ ~80s for a full review (max_tokens=600). In the 60–120s budget; streamed so it never looks frozen. Tune down via `max_tokens` for a punchier stage pace. |
+| **Critic arch/parser** | ✅ plain `LlamaForCausalLM`, BF16, no reasoning parser needed |
+| **Writer NVFP4 (plain)** | ❌ `KeyError: layers.1.mixer.experts.w2_weight_scale` — NVFP4 MoE export ahead of this vLLM loader (0.20.1.dev) |
+| **Writer DSpark variant** | ❌ not a model — it's a `Qwen3DSparkModel` spec-decode draft head |
+| **Writer BF16** | ⏳ downloading (~60GB) — the fallback under test; else gpt-oss-120b |
+| **Option A (writer+critic share GPUs)** | ⏳ pending a working writer to co-load with the critic |
 
 ## 1. What the demo is *for* (the story, in priority order)
 
 1. **Larger models run on clustered Sparks.** The **critic** (Llama-3.3-Nemotron-70B)
    is served **tensor-parallel across BOTH Sparks** — it's the model that *needs*
-   the cluster, and the audience watches it review code live.
+   the cluster, and the audience watches it review code live. ✅ **PROVEN.**
+
 2. **The Spark is a developer's machine.** We show **code generation + code review**
    — a real dev workflow (write, test, critique, improve), not a chatbot toy.
    "This box helps you with your actual work."
@@ -106,12 +119,8 @@ Design rules:
 | `orchestrator/` config | two OpenAI base-URLs (WRITER_PORT, CRITIC_PORT) instead of one |
 | `frontend/arena.html` + `theater.html` | NEW "Critique" panel (verdict + findings), streamed |
 | `docs/` | this file + updated CLUSTER_OPS for two engines |
-
 ## 6. Open questions to answer during the build
-1. **⚠ Option A concurrency** — can writer TP=1 + critic TP=2 coexist on the rig?
-   (First thing to test. Determines the whole runtime shape.)
-2. Model licenses / gated access — confirm both are pullable from HF on the rig
-   (the current cache has Super-120B + gpt-oss; these two are new downloads).
+2. Model licenses / gated access
 3. Does `Llama-3.3-Nemotron-70B-Feedback` want a reasoning parser like Super did?
    (Check its model card / chat template before wiring vLLM.)
    — **Resolved:** critic arch is plain `LlamaForCausalLM`, BF16, no special parser.
