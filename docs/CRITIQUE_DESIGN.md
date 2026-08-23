@@ -16,7 +16,7 @@
 | **Writer DSpark variant** | ✅ **REHABILITATED** — it's the model card's *recommended* speculative-decoding drafter for DGX Spark (`--speculative_config`), makes the writer FASTER. Not a standalone model, but pairs with the NVFP4 writer. |
 | **Writer BF16** | ⏳ downloading (~60GB) — the fallback under test; else gpt-oss-120b |
 | **Option A (writer+critic share GPUs)** | ✅ **WORKS with the small NVFP4 writer.** Critic TP=2 (~86GB head / ~89GB worker) + NVFP4 writer (~22GB) on the worker = ~5GB free on the worker, stable. Both serve simultaneously; head reaches the writer cross-node. **Do NOT use the BF16 writer (60GB) — only NVFP4 co-resides.** |
-| **Full pipeline end-to-end** | ✅ **WORKS.** Challenge B live: writer(Lightning) generates → tests score 22/100 → critic(70B TP=2) reviews in 66s → verdict `needs-work` + 3 findings, correctly catching that the writer didn't fix the bug. writer→tests→critic proven on hardware. |
+| **Full pipeline end-to-end** | ✅ **WORKS + CONTRASTS.** (1) Challenge B live: writer generates → tests 22/100 → critic `needs-work` "does not address the bug" (66s). (2) Challenge C guardrailed: tests 97/100 → critic `ship-with-nits` "optimized, passes all tests, minor clarity issues; consider input validation". The critic tracks correctness AND adds senior-level nuance — the demo's core story, proven both ways. |
 
 ### ⚠ Hard lesson (2026-08-23): memory ceiling is the real constraint
 GB10 has **128GB unified** CPU+GPU memory per Spark. The 70B critic (TP=2) puts
