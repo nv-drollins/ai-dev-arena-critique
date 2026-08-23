@@ -809,6 +809,18 @@ async def root():
     return {"service": "AI Dev Arena Orchestrator", "status": "running"}
 
 
+@app.get("/api/config")
+async def api_config():
+    """Runtime model wiring — lets the UI show writer/critic names + critic state."""
+    return {
+        "writer_model": WRITER_MODEL,
+        "writer_url": WRITER_URL,
+        "critic_model": CRITIC_MODEL,
+        "critic_url": CRITIC_URL,
+        "critic_enabled": CRITIC_ENABLED,
+    }
+
+
 @app.get("/api/challenges")
 async def list_challenges():
     return {"challenges": CHALLENGES}
