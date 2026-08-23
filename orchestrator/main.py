@@ -485,7 +485,10 @@ RULES:
                             {"role": "system", "content": "You are a coding assistant. Return ONLY valid JSON with search/replace patches."},
                             {"role": "user", "content": meta_prompt},
                         ],
-                        "max_tokens": 32000 if "nemotron" in MODEL_NAME else 16000,
+                        # Writer output is small (patch JSON). Cap well under
+                        # the model's context so prompt+output never overflows
+                        # (Lightning-30B ctx=32768; 32000 output overflowed → 400).
+                        "max_tokens": int(os.environ.get("WRITER_MAX_TOKENS", "8192")),
                         "temperature": 0.1,
                     },
                     timeout=900,
