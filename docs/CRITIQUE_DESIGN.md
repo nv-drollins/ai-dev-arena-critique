@@ -15,7 +15,17 @@
 | **Writer NVFP4 (plain)** | ❌ `KeyError: layers.1.mixer.experts.w2_weight_scale` — NVFP4 MoE export ahead of this vLLM loader (0.20.1.dev) |
 | **Writer DSpark variant** | ❌ not a model — it's a `Qwen3DSparkModel` spec-decode draft head |
 | **Writer BF16** | ⏳ downloading (~60GB) — the fallback under test; else gpt-oss-120b |
-| **Option A (writer+critic share GPUs)** | ⏳ pending a working writer to co-load with the critic |
+| **Option A (writer+critic share GPUs)** | ❌ **RULED OUT on GB10.** The critic's Ray placement group reserves **2.0/2.0 GPU** (both whole GPUs). Co-loading a 60GB BF16 writer beside the ~70GB critic shard exceeds the **128GB unified memory** and thrashed the head node into a ~20-min unrecoverable state (network-alive, SSH couldn't fork a shell) → required a hard reboot. **The writer MUST be small (NVFP4/quantized ~20GB) so writer(~20GB)+critic(~70GB)≈90GB fits, OR run sequentially.** BF16 writer (60GB) is memory-incompatible with a resident 70B critic. |
+
+### ⚠ Hard lesson (2026-08-23): memory ceiling is the real constraint
+GB10 has **128GB unified** CPU+GPU memory per Spark. The 70B critic (TP=2) puts
+~70GB on each node. That leaves **~55GB** for a co-resident writer — which rules
+out the 60GB BF16 writer entirely. The writer must be **≤~40GB** to co-exist:
+- ✅ a working **NVFP4 writer (~22GB)** — needs a vLLM build that loads its MoE export
+- ✅ **gpt-oss-120b** is MoE and was already co-running fine before
+- ❌ **BF16 30B writer (60GB)** — do NOT co-load with the 70B critic; it thrashes the node
+Never launch a second large engine on a node already hosting a 70B TP shard
+without checking `free -g` headroom first. When in doubt, **sequence** (Option B).
 
 ## 1. What the demo is *for* (the story, in priority order)
 

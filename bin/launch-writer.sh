@@ -24,7 +24,19 @@ _run() {
   local box
   box=$(docker ps --format '{{.Names}}' | grep -E '^node-[0-9]+$' | head -1)
   [ -n "$box" ] || { echo "no Ray container on $(hostname) — start the cluster first"; exit 1; }
-  echo "[writer] container $box on $(hostname) — serving $WRITER_SERVED (TP=$WRITER_TP, :$WRITER_PORT)"
+  # MEMORY SAFETY GUARD (learned the hard way 2026-08-23): GB10 has 128GB unified
+  # memory. A resident 70B critic shard (~70GB) + a BF16 writer (~60GB) exceeds it
+  # and thrashes the node to an unrecoverable state. Refuse to launch if free < guard.
+  local free_gb; free_gb=$(free -g | awk '/Mem/{print $7}')   # "available" column
+  local need_gb="${WRITER_MIN_FREE_GB:-45}"
+  if [ -n "$free_gb" ] && [ "$free_gb" -lt "$need_gb" ]; then
+    echo "[writer] ✗ REFUSING to launch: only ${free_gb}GB available, need >=${need_gb}GB."
+    echo "[writer]   A 70B critic is probably resident. Co-loading here will thrash the node."
+    echo "[writer]   Options: use a SMALL writer (NVFP4 ~22GB / gpt-oss), or stop the critic first,"
+    echo "[writer]   or run the writer on the OTHER Spark. Override with WRITER_MIN_FREE_GB=0 (danger)."
+    exit 2
+  fi
+  echo "[writer] container $box on $(hostname) — serving $WRITER_SERVED (TP=$WRITER_TP, :$WRITER_PORT), ${free_gb}GB free"
   docker exec "$box" /bin/bash -lc "
     set -euo pipefail
     export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
