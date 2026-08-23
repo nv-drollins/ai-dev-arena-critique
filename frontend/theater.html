@@ -106,6 +106,25 @@ function onEvent(ev) {
     });
     dv.appendChild(pre); dv.scrollTop = dv.scrollHeight;
   }
+  // Code review (critic) — render into the activity feed as a formatted block
+  if (ev.critique) {
+    const c = ev.critique;
+    const a = document.getElementById('actv');
+    const box = document.createElement('div');
+    box.className = 'tl';
+    box.style.cssText = 'border-left:3px solid #6366f1;padding-left:8px;margin-top:6px;white-space:normal;';
+    const verdict = (c.verdict||'review').toLowerCase();
+    const vcol = {ship:'#4ade80','ship-with-nits':'#fbbf24','needs-work':'#f87171'}[verdict]||'#93c5fd';
+    let html = `<b style="color:${vcol}">🔎 REVIEW — ${verdict.toUpperCase()}</b> `
+             + `<span style="opacity:.6">(70B critic)</span><br>`
+             + `<span style="color:#cbd5e1">${(c.summary||'').replace(/</g,'&lt;')}</span>`;
+    (c.findings||[]).forEach(f => {
+      html += `<br>• <b style="opacity:.7">${(f.kind||'note')}</b>: ${(f.note||'').replace(/</g,'&lt;')}`;
+    });
+    if (c.better_way) html += `<br><i style="color:#a5b4fc">💡 ${c.better_way.replace(/</g,'&lt;')}</i>`;
+    box.innerHTML = html;
+    a.appendChild(box); a.scrollTop = a.scrollHeight;
+  }
 }
 
 async function loadSession() {
