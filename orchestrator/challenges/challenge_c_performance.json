@@ -1,0 +1,23 @@
+{
+  "id": "C",
+  "name": "Performance Pit Stop",
+  "title": "Improve Dashboard Render Performance",
+  "description": "The dashboard is slow with 10,000 rows. Improve render time without changing the UI.",
+  "prompt": "You are working on the app in the repository at {{repo_path}}. A performance issue has been reported:\n\n\"The dashboard takes over 4 seconds to render when loading 10,000 rows of data. This is unacceptable.\"\n\nYour task:\n1. Profile the current code to identify the bottleneck in generate_dashboard_data()\n2. Optimize _render_dashboard_row() to eliminate the O(n\u00b2) behavior\n3. The benchmark (python3 app.py --benchmark) should complete in under 2 seconds\n4. All existing tests must still pass\n5. The output structure (label, value, count fields) must be maintained\n\nWork step by step. First measure, then optimize, then validate.",
+  "golden_branch": "golden/performance",
+  "validation": {
+    "tests": ["cd {{repo_path}} && python3 -m pytest tests/test_app.py -k 'not promo and not filter' -v"],
+    "checks": ["cd {{repo_path}} && python3 app.py --benchmark"],
+    "timeout_seconds": 240
+  },
+  "scoring_weights": {
+    "time_to_result": 20,
+    "test_pass_rate": 25,
+    "code_quality": 20,
+    "requirement_completeness": 20,
+    "efficiency": 10,
+    "human_overrides": 5
+  },
+  "max_duration": 300,
+  "audience": "engineering_leaders"
+}

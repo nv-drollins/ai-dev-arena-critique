@@ -1,0 +1,23 @@
+{
+  "id": "B",
+  "name": "Bug Bash",
+  "title": "Fix Broken Filter on Empty Search",
+  "description": "Users report that filtering by status breaks when the search field is empty. Find the cause and fix it.",
+  "prompt": "You are working on the app in the repository at {{repo_path}}. A bug has been reported:\n\n\"When I search with an empty query and try to filter by status, the status filter is completely ignored and I get ALL orders instead of just the ones matching the status.\"\n\nYour task:\n1. Inspect the repo and identify the root cause of the bug in the search_orders() function\n2. Fix the bug so status filtering works even when the search query is empty\n3. Add a test that reproduces the bug\n4. Ensure all baseline tests still pass\n\nWork step by step. First reproduce and understand the bug, then fix it.",
+  "golden_branch": "golden/bug_bash",
+  "validation": {
+    "tests": ["cd {{repo_path}} && python3 -m pytest tests/test_app.py -k 'not promo' -v"],
+    "checks": ["cd {{repo_path}} && python3 app.py --check-empty-filter"],
+    "timeout_seconds": 240
+  },
+  "scoring_weights": {
+    "time_to_result": 20,
+    "test_pass_rate": 25,
+    "code_quality": 20,
+    "requirement_completeness": 20,
+    "efficiency": 10,
+    "human_overrides": 5
+  },
+  "max_duration": 300,
+  "audience": "developers"
+}

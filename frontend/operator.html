@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Dev Arena — Operator Console</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #21262d;
+  --text: #e0e7ef;
+  --muted: #55667a;
+  --accent: #00d4ff;
+  --green: #10b981;
+  --red: #ef4444;
+  --yellow: #f59e0b;
+  --danger: #dc2626;
+}
+
+body {
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 24px;
+}
+
+h1 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+h1 .logo { color: var(--accent); }
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.card h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+
+/* Challenge cards */
+.challenge-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.challenge-card:hover { border-color: var(--accent); }
+.challenge-card.selected { border-color: var(--accent); background: #0d1f2e; }
+
+.challenge-card .name { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+.challenge-card .desc { font-size: 13px; color: var(--muted); line-height: 1.4; }
+.challenge-card .id { font-size: 11px; color: var(--accent); text-transform: uppercase; }
+
+/* Mode selector */
+.mode-selector, .audience-selector {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.mode-btn, .audience-btn {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.mode-btn.active, .audience-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: #0d1f2e;
+}
+
+/* Action buttons */
+.actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.btn {
+  flex: 1;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #000;
+}
+.btn-primary:hover { opacity: 0.85; }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary.running {
+  opacity: 1 !important;
+  cursor: default;
+  color: #000;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 65%, #000), color-mix(in srgb, var(--accent) 45%, #000));
+  border: 1px solid color-mix(in srgb, var(--accent) 70%, #000);
+  animation: btn-pulse 1.7s ease-in-out infinite;
+}
+.btn-primary.done { opacity: 0.95; cursor: default; }
+.btn-primary.restart { background: var(--accent); color: #000; cursor: pointer; }
+.btn-primary.restart:hover { opacity: 0.85; }
+@keyframes btn-pulse {
+  0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); }
+  50%     { box-shadow: 0 0 14px 2px color-mix(in srgb, var(--accent) 55%, transparent); }
+}
+
+.btn-danger {
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+.btn-danger:hover { background: var(--danger); color: #fff; }
+
+.btn-warning {
+  background: transparent;
+  border: 1px solid var(--yellow);
+  color: var(--yellow);
+}
+.btn-warning:hover { background: var(--yellow); color: #000; }
+
+.btn-green {
+  background: transparent;
+  border: 1px solid var(--green);
+  color: var(--green);
+}
+.btn-green:hover { background: var(--green); color: #000; }
+
+/* Session info */
+.session-info {
+  display: none;
+}
+
+.session-info.active { display: block; }
+
+.session-id {
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--accent);
+  background: var(--bg);
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin-bottom: 12px;
+}
+
+.session-status {
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.session-status .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.session-status .dot.green { background: var(--green); }
+.session-status .dot.yellow { background: var(--yellow); }
+.session-status .dot.red { background: var(--red); }
+
+.link-btn {
+  display: inline-block;
+  padding: 8px 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 12px;
+  margin-right: 8px;
+  margin-top: 8px;
+}
+
+.link-btn:hover { background: #0d1f2e; }
+
+/* Viewer links — bigger + centered under the action buttons */
+#viewerLinks { justify-content: center; }
+#viewerLinks .link-btn {
+  padding: 11px 26px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+  margin: 0 5px;
+}
+
+.score-box {
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 12px;
+  display: none;
+}
+
+.score-box.visible { display: block; }
+
+.score-big {
+  font-size: 36px;
+  font-weight: 800;
+  text-align: center;
+  color: var(--accent);
+}
+
+.score-detail {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 8px;
+  line-height: 1.6;
+}
+</style>
+</head>
+<body>
+<h1><span class="logo">⚡</span> Operator Console</h1>
+
+<div class="grid">
+  <div class="card">
+    <h2>Select Challenge</h2>
+    <div id="challengeList"></div>
+  </div>
+
+  <div class="card">
+    <h2>Demo Mode</h2>
+    <div class="mode-selector">
+      <button class="mode-btn" data-mode="live" onclick="selectMode(this)">Fully Live</button>
+      <button class="mode-btn active" data-mode="guardrailed" onclick="selectMode(this)">Guardrailed</button>
+      <button class="mode-btn" data-mode="replay" onclick="selectMode(this)">Replay</button>
+    </div>
+
+    <h2>Audience</h2>
+    <div class="audience-selector">
+      <button class="audience-btn active" data-audience="broad" onclick="selectAudience(this)">Broad</button>
+      <button class="audience-btn" data-audience="developers" onclick="selectAudience(this)">Developers</button>
+      <button class="audience-btn" data-audience="executives" onclick="selectAudience(this)">Executives</button>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="startBtn" onclick="startSession()" disabled>Start</button>
+    </div>
+    <div class="actions" style="margin-top:12px;">
+      <button class="btn btn-green" id="resetBtn" onclick="resetSession()" disabled>↻ Reset</button>
+      <button class="btn btn-warning" id="fallbackBtn" onclick="fallbackSession()" disabled>⚡ Fallback</button>
+      <button class="btn btn-danger" id="stopBtn" onclick="stopSession()" disabled>■ Stop</button>
+    </div>
+    <div class="actions" style="margin-top:12px;" id="viewerLinks">
+      <a class="link-btn" id="arenaLink" target="_blank" href="/arena">↗ Arena Display</a>
+      <a class="link-btn" id="theaterLink" target="_blank" href="/theater">↗ Code Theater</a>
+    </div>
+  </div>
+
+  <div class="card session-info" id="sessionInfo">
+    <h2>Active Session</h2>
+    <div class="session-id" id="sessionDisplay">—</div>
+    <div class="session-status" id="sessionStatus"><span class="dot yellow"></span>Starting...</div>
+    <div class="score-box" id="scoreBox">
+      <div class="score-big" id="scoreBig">—</div>
+      <div class="score-detail" id="scoreDetail"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Quick Reference</h2>
+    <div style="font-size:13px; color:var(--muted); line-height:1.6;">
+      <p><strong>Start</strong> — Launch agent against selected challenge</p>
+      <p><strong>Reset</strong> — Revert repo to baseline state</p>
+      <p><strong>Fallback</strong> — Apply golden solution (rescue)</p>
+      <p><strong>Stop</strong> — Cancel current run</p>
+    </div>
+    <div style="margin-top:16px; font-size:12px; color:var(--muted);">
+      <p>⚠ Always reset before starting a new challenge</p>
+      <p>⚡ Fallback takes ~2 seconds to apply</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '/api';
+let selectedChallenge = null;
+let currentSession = null;
+let selectedMode = 'guardrailed';
+let selectedAudience = 'broad';
+
+async function loadChallenges() {
+  const resp = await fetch(API + '/challenges');
+  const data = await resp.json();
+  const list = document.getElementById('challengeList');
+  list.innerHTML = '';
+  // Sort by ID (A, B, C) for consistent ordering
+  const sorted = Object.entries(data.challenges).sort((a, b) => a[0].localeCompare(b[0]));
+  for (const [id, ch] of sorted) {
+    const card = document.createElement('div');
+    card.className = 'challenge-card';
+    card.onclick = () => selectChallenge(card, id);
+    card.innerHTML = `
+      <div class="id">Challenge ${id} — ${ch.name}</div>
+      <div class="name">${ch.title}</div>
+      <div class="desc">${ch.description}</div>
+    `;
+    list.appendChild(card);
+  }
+}
+
+function selectChallenge(card, id) {
+  document.querySelectorAll('.challenge-card').forEach(c => c.classList.remove('selected'));
+  card.classList.add('selected');
+  selectedChallenge = id;
+  document.getElementById('startBtn').disabled = false;
+}
+
+function selectMode(btn) {
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  selectedMode = btn.dataset.mode;
+}
+
+function selectAudience(btn) {
+  document.querySelectorAll('.audience-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  selectedAudience = btn.dataset.audience;
+}
+
+/* Shared real-time channel: Operator -> Arena/Theater viewers, instant. */
+var ARENA_NOTIFY = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel('arena_notify') : null;
+function notifyViewers(sessionId, status) {
+  const payload = { session: sessionId, status: status, t: Date.now() };
+  // 1) Instant: BroadcastChannel (same origin, same browser)
+  if (ARENA_NOTIFY) { try { ARENA_NOTIFY.postMessage(payload); } catch (e) {} }
+  // 2) Fallback: localStorage 'storage' event (cross-tab, works everywhere)
+  if (typeof Storage !== 'undefined') {
+    try {
+      localStorage.setItem('arena_session', sessionId);
+      localStorage.setItem('arena_session_ts', Date.now().toString());
+    } catch (e) {}
+  }
+}
+
+async function startSession() {
+  if (!selectedChallenge) return;
+  const btn = document.getElementById('startBtn');
+  btn.disabled = true;
+  btn.classList.remove('done', 'restart');
+  btn.textContent = 'Starting\u2026';
+
+  try {
+    const resp = await fetch(API + '/session/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        challenge_id: selectedChallenge,
+        mode: selectedMode,
+        audience: selectedAudience,
+      }),
+    });
+    const data = await resp.json();
+    if (Array.isArray(data)) { throw new Error(data[0]); }
+    currentSession = data.session_id;
+    showSession(data.session_id, 'running');
+
+    // Button: Running state (shaded, disabled but visible)
+    btn.textContent = '\u25cf Running';
+    btn.classList.add('running');
+    document.getElementById('resetBtn').disabled = false;
+    document.getElementById('fallbackBtn').disabled = false;
+    document.getElementById('stopBtn').disabled = false;
+
+    // Instantly push to Arena/Theater viewers (no waiting on their poll)
+    notifyViewers(currentSession, 'running');
+
+    // Poll for completion
+    pollSession();
+  } catch (e) {
+    btn.disabled = false;
+    btn.classList.remove('running');
+    btn.textContent = 'Start';
+    console.error('Start failed:', e);
+  }
+}
+
+// Auto-refresh any Arena/Theater tabs with the session ID
+async function broadcastSessionToTabs() {
+  // Use localStorage to signal other tabs
+  if (typeof Storage !== 'undefined') {
+    localStorage.setItem('arena_session', currentSession);
+    localStorage.setItem('arena_session_ts', Date.now().toString());
+  }
+}
+
+async function resetSession() {
+  if (!currentSession) return;
+  try {
+    await fetch(API + '/session/' + currentSession + '/reset', { method: 'POST' });
+    const btn = document.getElementById('startBtn');
+    btn.classList.remove('running', 'restart', 'done');
+    btn.textContent = 'Start';
+    btn.disabled = !selectedChallenge;
+    showSession(currentSession, 'ready');
+    notifyViewers(currentSession, 'ready');
+  } catch (e) { console.error(e); }
+}
+
+async function fallbackSession() {
+  if (!currentSession) return;
+  await fetch(API + '/session/' + currentSession + '/fallback', { method: 'POST' });
+  showSession(currentSession, 'fallback');
+}
+
+function stopSession() {
+  currentSession = null;
+  const btn = document.getElementById('startBtn');
+  btn.classList.remove('running', 'done', 'restart');
+  btn.disabled = false;
+  btn.textContent = 'Start';
+  document.getElementById('resetBtn').disabled = true;
+  document.getElementById('fallbackBtn').disabled = true;
+  document.getElementById('stopBtn').disabled = true;
+  document.getElementById('sessionInfo').classList.remove('active');
+  document.getElementById('scoreBox').classList.remove('visible');
+}
+
+function showSession(id, status) {
+  document.getElementById('sessionInfo').classList.add('active');
+  document.getElementById('sessionDisplay').textContent = `Session: ${id}`;
+
+  const statusEl = document.getElementById('sessionStatus');
+  const statusMap = {
+    running: ['green', 'Running — agent working...'],
+    ready: ['yellow', 'Ready — waiting to start'],
+    fallback: ['yellow', 'Fallback applied'],
+    completed: ['green', 'Completed!'],
+  };
+  const [cls, msg] = statusMap[status] || ['yellow', status];
+  statusEl.innerHTML = `<span class="dot ${cls}"></span>${msg}`;
+
+  document.getElementById('arenaLink').href = `/arena?session_id=${id}`;
+  document.getElementById('theaterLink').href = `/theater?session_id=${id}`;
+}
+
+async function pollSession() {
+  const interval = setInterval(async () => {
+    if (!currentSession) { clearInterval(interval); return; }
+    try {
+      const resp = await fetch(API + `/session/${currentSession}`);
+      const data = await resp.json();
+      if (data.status === 'completed') {
+        // Button: done, ready to run again
+        const btn = document.getElementById('startBtn');
+        btn.classList.remove('running');
+        btn.textContent = '↻ Run Again';
+        btn.classList.add('restart');
+        btn.disabled = false;
+        showSession(currentSession, 'completed');
+        // Let viewers see the final state too
+        notifyViewers(currentSession, 'completed');
+
+        if (data.score) {
+          document.getElementById('scoreBox').classList.add('visible');
+          document.getElementById('scoreBig').textContent = `${data.score.overall}/${data.score.max_possible} (${data.score.percentage}%)`;
+          const bd = data.score.breakdown || {};
+          let detail = '';
+          for (const [k, v] of Object.entries(bd)) {
+            detail += `${k}: ${v.score}/${v.max} — ${v.detail}\n`;
+          }
+          document.getElementById('scoreDetail').textContent = detail;
+        }
+        clearInterval(interval);
+      }
+    } catch (e) { /* ignore */ }
+  }, 2000);
+}
+
+// Init
+loadChallenges();
+</script>
+</body>
+</html>

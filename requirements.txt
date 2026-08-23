@@ -1,0 +1,20 @@
+# AI Dev Arena — Python dependencies (orchestrator + demo CLI)
+#
+# Both installed into a Python 3.11+ virtualenv.
+# The Docker image (nvcr.io/nvidia/vllm) is what runs the MODEL; it is not
+# installed via pip. This list is for the head-node app + CLI only.
+
+# Web server + WS (orchestrator)
+fastapi>=0.115
+uvicorn[standard]>=0.30
+
+# HTTP + websockets used by scripts/run_demo.py and scripts/test_ws_live.py
+aiohttp>=3.9
+websockets>=12.0
+
+# Testing
+pytest>=8.0
+
+# Optional — only if you enable a `gpt-oss`-based `--llm` backend switch
+# (not used today; kept for future)
+# openai>=1.40

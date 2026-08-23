@@ -1,0 +1,23 @@
+{
+  "id": "A",
+  "name": "Feature Sprint",
+  "title": "Add Promo Code to Checkout",
+  "description": "Add a promo-code field to checkout. Validate codes, show discount, update order total, and add tests.",
+  "prompt": "You are working on the checkout app in the repository at {{repo_path}}. Your task: Add a promo code feature to the checkout process.\n\nRequirements:\n1. Add promo code support to calculate_discount() — recognized codes: SAVE10 (10% off), WELCOME20 (20% off), VIP50 (50% off)\n2. Apply the discount to the order total and display the discount amount\n3. Invalid promo codes should cause the checkout to return an error\n4. Add unit tests for the promo code validation logic\n5. Keep existing functionality intact — baseline tests that pass now must continue to pass\n\nWork step by step. First inspect the repo structure, then implement the changes, then run tests.",
+  "golden_branch": "golden/feature_sprint",
+  "validation": {
+    "tests": ["cd {{repo_path}} && python3 -m pytest tests/test_app.py -k 'not promo and not filter' -v", "cd {{repo_path}} && python3 -m pytest tests/test_app.py::test_promo_save10 tests/test_app.py::test_promo_welcome20 tests/test_app.py::test_promo_invalid tests/test_app.py::test_no_promo_unchanged -v"],
+    "checks": ["cd {{repo_path}} && python3 app.py --check-promo-save10"],
+    "timeout_seconds": 240
+  },
+  "scoring_weights": {
+    "time_to_result": 20,
+    "test_pass_rate": 25,
+    "code_quality": 20,
+    "requirement_completeness": 20,
+    "efficiency": 10,
+    "human_overrides": 5
+  },
+  "max_duration": 300,
+  "audience": "broad"
+}

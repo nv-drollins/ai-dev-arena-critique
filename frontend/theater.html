@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Dev Arena — Code Theater</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0a0a0f; --surface: #111827; --border: #1e2a3a;
+  --text: #e0e7ef; --muted: #55667a; --accent: #00d4ff;
+  --green: #10b981; --red: #ef4444; --yellow: #f59e0b;
+  --diff-add: #0d2818; --diff-del: #2a1215; --diff-add-t: #3fb950; --diff-del-t: #f97583;
+}
+body { font-family: 'JetBrains Mono','Fira Code','Consolas',monospace; background:var(--bg); color:var(--text); height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+.header { height:48px; background:var(--surface); border-bottom:1px solid var(--border); display:flex; align-items:center; padding:0 20px; gap:16px; }
+.header .logo { font-weight:700; font-size:14px; color:var(--accent); }
+.header .phase { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
+.header .elapsed { font-variant-numeric:tabular-nums; color:var(--muted); margin-left:auto; }
+.grid { flex:1; display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--border); overflow:hidden; }
+.panel { background:var(--bg); overflow:hidden; display:flex; flex-direction:column; }
+.ph { padding:8px 16px; background:var(--surface); font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--muted); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:8px; }
+.pb { flex:1; overflow-y:auto; padding:12px 16px; font-size:12px; line-height:1.5; }
+.diff-line { padding:0 8px; }
+.diff-line.add { background:var(--diff-add); color:var(--diff-add-t); }
+.diff-line.del { background:var(--diff-del); color:var(--diff-del-t); }
+.diff-line.ctx { color:var(--muted); }
+.diff-line.hdr { color:var(--accent); font-weight:700; }
+.tl { padding:2px 0; border-bottom:1px solid rgba(255,255,255,.03); white-space:pre-wrap; }
+.tl.pass { color:var(--green); } .tl.fail { color:var(--red); } .tl.info { color:var(--accent); }
+.fi { display:flex; align-items:center; gap:8px; padding:4px 0; font-size:12px; }
+.fip { width:4px; height:4px; border-radius:50%; display:inline-block; }
+.fip.added { background:var(--green); } .fip.modified { background:var(--yellow); } .fip.removed { background:var(--red); }
+.empty { display:flex; align-items:center; justify-content:center; height:100%; color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <span class="logo">⚡ CODE THEATER</span>
+  <span class="phase" id="phLabel">WAITING FOR CHALLENGE...</span>
+  <span class="elapsed" id="eph">--s</span>
+</div>
+<div class="grid">
+  <div class="panel">
+    <div class="ph">📄 FILES CHANGED</div>
+    <div class="pb" id="fList"><div class="empty">Waiting...</div></div>
+  </div>
+  <div class="panel">
+    <div class="ph">📝 DIFF VIEW</div>
+    <div class="pb" id="dView"><div class="empty">No changes yet</div></div>
+  </div>
+  <div class="panel">
+    <div class="ph">💻 TERMINAL</div>
+    <div class="pb" id="term"><div class="empty">No output yet</div></div>
+  </div>
+  <div class="panel">
+    <div class="ph">📋 ACTIVITY</div>
+    <div class="pb" id="actv"><div class="empty">No activity yet</div></div>
+  </div>
+</div>
+<script>
+const WS = `ws://${location.host}`;
+let ws = null, sid = null, sess = null;
+
+function onEvent(ev) {
+  // Phase
+  document.getElementById('phLabel').textContent = (ev.phase||'---').toUpperCase();
+  document.getElementById('eph').textContent = (ev.elapsed != null ? ev.elapsed+'s' : '--s');
+  // Activity
+  const a = document.getElementById('actv');
+  a.querySelector('.empty') && (a.innerHTML='');
+  const al = document.createElement('div'); al.className = 'tl info';
+  al.textContent = `[${ev.elapsed||0}s] ${ev.message}`;
+  a.appendChild(al); a.scrollTop = a.scrollHeight;
+  // Terminal
+  if (ev.terminal_output) {
+    const t = document.getElementById('term');
+    t.querySelector('.empty') && (t.innerHTML='');
+    const tl = document.createElement('pre'); tl.className = 'tl';
+    tl.textContent = ev.terminal_output.replace(/\n/g,'\n  ').trim();
+    if (/PASS/.test(ev.terminal_output)) tl.classList.add('pass');
+    else if (/FAIL/.test(ev.terminal_output)) tl.classList.add('fail');
+    t.appendChild(tl); t.scrollTop = t.scrollHeight;
+  }
+  // Files
+  if (ev.files_changed && ev.files_changed.length) {
+    const fl = document.getElementById('fList'); fl.innerHTML='';
+    ev.files_changed.forEach(f => {
+      const item = document.createElement('div'); item.className='fi';
+      item.innerHTML=`<span class="fip ${(f.type||'modified')==='added'?'added':f.type==='removed'?'removed':'modified'}"></span><span>${f.file}</span>`;
+      fl.appendChild(item);
+    });
+  }
+  // Diff
+  if (ev.diff && ev.diff.length > 2) {
+    const dv = document.getElementById('dView'); dv.innerHTML='';
+    const pre = document.createElement('pre');
+    pre.style.cssText = 'font-size:11px;line-height:1.5;';
+    ev.diff.split('\n').forEach(l => {
+      const sp = document.createElement('div'); sp.className = 'diff-line';
+      if (/^[+-]{3}/.test(l)) sp.classList.add('hdr');
+      else if (/^\+/.test(l)) sp.classList.add('add');
+      else if (/^-/.test(l)) sp.classList.add('del');
+      else sp.classList.add('ctx');
+      sp.textContent = l; pre.appendChild(sp);
+    });
+    dv.appendChild(pre); dv.scrollTop = dv.scrollHeight;
+  }
+}
+
+async function loadSession() {
+  try { const r = await fetch('/api/session/'+sid); if(r.ok){sess = await r.json();} } catch{}
+}
+
+/* Clean all per-run panels so a NEW run starts fresh (no stale diff/log). */
+function resetTheater() {
+  document.getElementById('phLabel').textContent = 'WAITING FOR CHALLENGE...';
+  document.getElementById('eph').textContent = '--s';
+  const fList = document.getElementById('fList');  fList.innerHTML = '<div class="empty">Waiting...</div>';
+  const dView = document.getElementById('dView'); dView.innerHTML = '<div class="empty">No changes yet</div>';
+  const term  = document.getElementById('term');  term.innerHTML  = '<div class="empty">No output yet</div>';
+  const actv  = document.getElementById('actv');  actv.innerHTML  = '<div class="empty">No activity yet</div>';
+}
+
+function connectTheaterWS() {
+  if (ws) ws.close();
+  const w = new WebSocket(WS+'/ws/theater/'+sid);
+  w.onmessage = e => onEvent(JSON.parse(e.data));
+  w.onerror = () => onEvent({phase:'error',message:'WS error',elapsed:0});
+  w.onclose = () => setTimeout(()=>{if(sid)connectTheaterWS();},2000);
+}
+
+/* auto-discover */
+async function discover() {
+  try {
+    const r = await fetch('/api/running-session');
+    if(r.ok){
+      const d = await r.json();
+      if(d.session_id && d.status && sid !== d.session_id){
+        resetTheater();
+        sid = d.session_id; await loadSession();
+        if(window._dI) clearInterval(window._dI); window._dI=null;
+        connectTheaterWS();
+      }
+    }
+  } catch {}
+}
+const urlParams = new URLSearchParams(location.search);
+const direct = urlParams.get('session_id');
+if(direct){ sid = direct; loadSession(); connectTheaterWS(); }
+else { window._dI = setInterval(discover,2000); discover(); }
+
+/* Instant viewer sync from Operator (Start / Complete). */
+if (typeof BroadcastChannel !== 'undefined') {
+  try {
+    const _bc = new BroadcastChannel('arena_notify');
+    _bc.onmessage = (e) => {
+      const d = e.data || {};
+      if (d.session && d.status === 'running' && d.session !== sid) {
+        resetTheater();
+        sid = d.session; loadSession(); connectTheaterWS();
+        if(window._dI) clearInterval(window._dI); window._dI=null;
+      }
+    };
+  } catch (e) {}
+}
+/* watch for start from Operator tab */
+try { window.addEventListener('storage', e => {
+  if(e.key==='arena_session' && e.newValue && e.newValue !== sid){
+    resetTheater();
+    sid = e.newValue; loadSession(); connectTheaterWS();
+    if(window._dI) clearInterval(window._dI); window._dI=null;
+  }
+}); } catch {}
+</script>
+</body>
+</html>

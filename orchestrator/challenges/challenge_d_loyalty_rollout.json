@@ -1,0 +1,26 @@
+{
+  "id": "D",
+  "name": "Loyalty Rollout",
+  "title": "Implement a Customer Loyalty Program",
+  "description": "Add a tiered loyalty program to checkout: compute a customer's tier from order history, expose it via a new endpoint, and apply the discount at checkout — implementing to a fixed test spec.",
+  "prompt": "You are working on the checkout app in the repository at {{repo_path}}. A product request has arrived to launch a customer loyalty program.\n\nRead app.py carefully first. It currently has PRODUCTS, ORDERS, a calculate_discount() that ignores promo codes, order search, and a dashboard.\n\n## The loyalty program to implement\n\n1. **Tiers by cumulative spend.** A customer's *total_spent* is the sum of their `ORDERS` totals where `status` is NOT \"cancelled\" (matching customer name case-insensitively). Tier is:\n   - BRONZE: total_spent < 100          -> 0%  discount\n   - SILVER: 100 <= total_spent < 200   -> 5%   discount\n   - GOLD:   total_spent >= 200         -> 10%  discount\n\n2. **New endpoint** `GET /api/loyalty/<customer>` returning JSON:\n   {\"customer\": str, \"total_spent\": number, \"tier\": \"BRONZE\"|\"SILVER\"|\"GOLD\", \"discount_pct\": number}\n   Unknown customers are valid: total_spent 0, tier BRONZE, discount 0.\n\n3. **Apply loyalty at checkout.** In `POST /api/cart`, when the request body includes `\"customer\": \"<name>\"`, apply that customer's loyalty discount_pct to the subtotal, and include a `\"loyalty\"` object in the response:\n   {\"customer\": str, \"tier\": str, \"total_spent\": number, \"discount_pct\": number}\n   When `customer` is absent or empty, the response must be exactly as before (total == subtotal, and NO `loyalty` key).\n\n## What to deliver\n- Implement the tier logic (a helper like `get_loyalty_tier` / `customer_spend` is fine), the new `/api/loyalty/<customer>` route, and wire the loyalty discount into `POST /api/cart`.\n- The acceptance tests for this feature ACTUALLY already exist in `tests/test_loyalty.py`. **Do not modify or delete that file** — it is the fixed spec. Implement the app so that entire file passes (and the baseline tests in tests/test_app.py keep passing).\n- You may add your own scratch tests elsewhere if you like, but `tests/test_loyalty.py` is the graded contract — make it green.\n\n## Hard constraints\n- Do NOT break existing behavior. A checkout with NO `customer` field must still return total == subtotal with no `loyalty` key.\n- Keep the response shape of /api/cart backward-compatible (subtotal, items, total still present).\n- All existing tests in tests/test_app.py must continue to pass.\n\nWork step by step: inspect, implement the helpers + endpoint, integrate into checkout, then run `python3 -m pytest tests/test_app.py tests/test_loyalty.py -v` and ensure it is green.",
+  "golden_branch": "golden/loyalty_rollout",
+  "validation": {
+    "tests": [
+      "cd {{repo_path}} && python3 -m pytest tests/test_app.py -k 'not promo and not filter' -v",
+      "cd {{repo_path}} && python3 -m pytest tests/test_loyalty.py -v"
+    ],
+    "checks": [],
+    "timeout_seconds": 240
+  },
+  "scoring_weights": {
+    "time_to_result": 20,
+    "test_pass_rate": 25,
+    "code_quality": 20,
+    "requirement_completeness": 20,
+    "efficiency": 10,
+    "human_overrides": 5
+  },
+  "max_duration": 300,
+  "audience": "broad"
+}
