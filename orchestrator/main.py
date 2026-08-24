@@ -485,15 +485,20 @@ RULES:
                             {"role": "system", "content": "You are a coding assistant. Return ONLY valid JSON with search/replace patches."},
                             {"role": "user", "content": meta_prompt},
                         ],
-                        # Writer output is small (patch JSON). Cap well under
-                        # the model's context so prompt+output never overflows
-                        # (Lightning-30B ctx=32768; 32000 output overflowed → 400).
-                        # Lightning is a REASONING model — it needs room to think
-                        # (CoT) AND emit the JSON. With --reasoning-parser the CoT
-                        # goes to a separate 'reasoning' field, but it still counts
-                        # against max_tokens. 8192 was too small (finish=length before
-                        # any JSON). ctx=32768, prompt ~6-8k → give ~22k for gen.
-                        "max_tokens": int(os.environ.get("WRITER_MAX_TOKENS", "22000")),
+                        # Nemotron-Lightning is a reasoning model. For this
+                        # patch-generation task we do NOT want it to burn the whole
+                        # token budget on chain-of-thought (that left content empty
+                        # → no patch → Fully-Live failures). Per the model card:
+                        #   enable_thinking=False   → skip CoT, answer directly
+                        #   force_nonempty_content=True → always emit content (JSON)
+                        # Both are the card's recommended settings for coding agents.
+                        "chat_template_kwargs": {
+                            "enable_thinking": os.environ.get("WRITER_THINK", "0") == "1",
+                            "force_nonempty_content": True,
+                        },
+                        # With enable_thinking=False the model answers directly, so
+                        # a small budget is plenty (patch JSON is a few hundred toks).
+                        "max_tokens": int(os.environ.get("WRITER_MAX_TOKENS", "4096")),
                         "temperature": float(os.environ.get("WRITER_TEMP", "0.6")),
                     },
                     timeout=900,
