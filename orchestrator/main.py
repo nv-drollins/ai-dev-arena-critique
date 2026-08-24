@@ -854,19 +854,15 @@ async def run_validation(work_dir: Path, challenge: dict):
 
 
 def _test_pass_fraction(test_results: list) -> float:
-    """Fraction of INDIVIDUAL tests that passed, parsed from pytest output.
-    Falls back to command-level pass ratio if per-test counts aren't found."""
-    import re
+    """Fraction of INDIVIDUAL tests that passed, parsed from pytest's summary
+    line (reuses scoring._pytest_counts so parsing stays consistent & robust).
+    Falls back to command-level pass ratio if no pytest summary is present."""
+    from orchestrator.scoring import _pytest_counts
     passed = failed = 0
     for r in test_results:
-        out = r.get("output", "") or ""
-        # pytest summary line: "X passed", "Y failed", "Z errors"
-        p = re.search(r"(\d+)\s+passed", out)
-        f = re.search(r"(\d+)\s+failed", out)
-        e = re.search(r"(\d+)\s+error", out)
-        if p: passed += int(p.group(1))
-        if f: failed += int(f.group(1))
-        if e: failed += int(e.group(1))     # collection errors count as failures
+        cp, cf = _pytest_counts(r.get("output", "") or "")
+        passed += cp
+        failed += cf
     total = passed + failed
     if total > 0:
         return passed / total

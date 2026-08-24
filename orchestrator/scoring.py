@@ -15,6 +15,32 @@ import time
 import re
 
 
+# pytest's terminal summary line, e.g.:  "===== 2 passed, 1 failed in 0.34s ====="
+# or "== 1 error in 0.08s ==".  Read counts ONLY from that final summary so we
+# never accidentally match numbers printed inside test output / source snippets.
+_SUMMARY_RE = re.compile(r"(\d+)\s+(passed|failed|error|errors|skipped)\b")
+
+
+def _pytest_counts(out: str) -> tuple[int, int]:
+    """Return (passed, failed) from a pytest run's FINAL summary line.
+    failed counts failures + errors; skipped is ignored. (0, 0) if not pytest."""
+    summary = None
+    for ln in reversed((out or "").splitlines()):
+        s = ln.strip().strip("= ")
+        if _SUMMARY_RE.search(s) and ("passed" in s or "failed" in s or "error" in s):
+            summary = s
+            break
+    if not summary:
+        return 0, 0
+    passed = failed = 0
+    for n, kind in _SUMMARY_RE.findall(summary):
+        if kind == "passed":
+            passed += int(n)
+        elif kind.startswith("error") or kind == "failed":
+            failed += int(n)
+    return passed, failed
+
+
 def score_session(session: dict) -> dict:
     """Score a completed session.
 
@@ -52,22 +78,17 @@ def score_session(session: dict) -> dict:
         time_score = 0
     breakdown["time_to_result"] = {"score": time_score, "max": weights["time_to_result"], "detail": f"{elapsed:.0f}s elapsed"}
 
-    # 2. Test pass rate (25 pts) — count INDIVIDUAL tests, not whole commands, so
-    # partial success is scored fairly (a command with 8/9 passing isn't a 0).
+    # 2. Test pass rate (25 pts) — count INDIVIDUAL tests, not whole commands.
     test_results = session.get("test_results", [])
     check_results = session.get("check_results", [])
     all_checks = test_results + check_results
-    import re as _re
     ind_pass = ind_total = 0
     for r in all_checks:
         out = r.get("output", "") or ""
-        p = _re.search(r"(\d+)\s+passed", out)
-        f = _re.search(r"(\d+)\s+failed", out)
-        e = _re.search(r"(\d+)\s+error", out)
-        cp = int(p.group(1)) if p else 0
-        cf = (int(f.group(1)) if f else 0) + (int(e.group(1)) if e else 0)
+        cp, cf = _pytest_counts(out)
         if cp or cf:
-            ind_pass += cp; ind_total += cp + cf
+            ind_pass += cp
+            ind_total += cp + cf
         else:
             # non-pytest check (e.g. a CLI --check): fall back to its exit status
             ind_total += 1
