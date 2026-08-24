@@ -276,10 +276,11 @@ function setScore(sc) {
 function fmt(sec){ const e=Math.max(0,Math.floor(sec)); return String(Math.floor(e/60)).padStart(2,'0')+':'+String(e%60).padStart(2,'0'); }
 function paint(id, sec, cls){ const el=document.getElementById(id); if(!el) return; el.textContent=fmt(sec); el.className='timer '+cls; }
 
-// Writing clock: runs from connect until the score arrives (writer + tests done).
+// Writing clock: runs from connect until the critic phase begins.
 function startWriteTimer(){
-  if (writeTimerId) return;
-  writeStartMs = Date.now(); writeFrozen = false;
+  if (writeFrozen) return;                 // never restart a frozen clock
+  if (writeTimerId) return;                // already running
+  if (writeStartMs == null) writeStartMs = Date.now();
   writeTimerId = setInterval(tickWrite, 250); tickWrite();
 }
 function tickWrite(){
@@ -288,9 +289,15 @@ function tickWrite(){
   paint('timerWrite', e, e>90?'danger':e>45?'warning':'running');
 }
 function stopWriteTimer(seconds){
+  if (writeFrozen && seconds == null) return;   // already frozen; don't clobber with a worse value
   if (writeTimerId){ clearInterval(writeTimerId); writeTimerId=null; }
+  // prefer an explicit seconds arg; else the live elapsed; else keep existing display
+  let e;
+  if (seconds != null) e = seconds;
+  else if (writeStartMs) e = (Date.now()-writeStartMs)/1000;
+  else if (writeFrozen) return;                 // frozen with no better value → leave as-is
+  else e = 0;
   writeFrozen = true;
-  const e = (seconds!=null) ? seconds : (writeStartMs? (Date.now()-writeStartMs)/1000 : 0);
   paint('timerWrite', e, 'final');
 }
 
@@ -429,18 +436,17 @@ function onEvent(ev) {
     else if (/FAIL|ERROR/.test(ev.terminal_output)) line.classList.add('fail');
     t.appendChild(line); t.scrollTop = t.scrollHeight;
   }
-  // The critic phase begins → freeze the writing clock, start the reviewing clock.
-  if (ev.phase === 'critiquing') { stopWriteTimer(); startReviewTimer(); }
-  if (ev.score) {
-    setScore(ev.score);
-    // score means writer+tests are done. Freeze writing at the score's elapsed.
-    stopWriteTimer(ev.elapsed);
-    // if a review is coming (critic enabled), kick off the review clock now.
-    if (CRITIC_MAYBE) startReviewTimer();
+  // The critic phase begins → freeze WRITING (at the backend's write_elapsed) and
+  // start the REVIEWING clock. This is THE moment code-writing ends.
+  if (ev.phase === 'critiquing') {
+    stopWriteTimer(ev.write_elapsed);
+    startReviewTimer();
   }
+  if (ev.score) setScore(ev.score);
   // live reviewer stream (heartbeat preview while the 70B thinks)
   if (ev.critique_stream !== undefined) {
-    startReviewTimer();   // ensure it's running once tokens flow
+    stopWriteTimer();     // ensure writing is frozen once review tokens flow
+    startReviewTimer();   // ensure it's running
     document.getElementById('critiqueArea').style.display = 'block';
     const st = document.getElementById('critiqueStream');
     st.style.display = 'block';
@@ -448,8 +454,12 @@ function onEvent(ev) {
     st.scrollTop = st.scrollHeight;
   }
   // final structured critique → review is done
-  if (ev.critique) { renderCritique(ev.critique); stopReviewTimer(); }
-  if (ev.phase === 'completed') { stopWriteTimer(); stopReviewTimer(); }
+  if (ev.critique) renderCritique(ev.critique);
+  if (ev.phase === 'completed') {
+    // Freeze both at the backend's authoritative split (falls back to live values).
+    stopWriteTimer(ev.write_elapsed);
+    stopReviewTimer(ev.review_elapsed);
+  }
   if (ev.phase === 'error') { stopWriteTimer(); stopReviewTimer(); }
 }
 
@@ -516,6 +526,13 @@ function resetView() {
 }
 
 function onSessionReady(s) {
+  // Guard: only (re)initialize when this is a NEW session id. Polling/discover can
+  // call this repeatedly for the same session — re-running resetTimers()/startTimer
+  // there would reset the clocks every tick (the freeze-then-climb bug).
+  if (window.__readySid === s.id && document.getElementById('activeUI').style.display !== 'none') {
+    return;   // already showing this session; let the WS drive updates
+  }
+  window.__readySid = s.id;
   resetView();
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('activeUI').style.display = 'flex';
@@ -526,11 +543,22 @@ function onSessionReady(s) {
   // Start the WRITING clock now (writer + tests are the first phase).
   if (s.status === 'completed' || s.status === 'failed' || s.status === 'error') {
     // Already-finished session: show the split from stored timings, don't run clocks.
-    const writeS = (s.score && s.score.breakdown && s.score.breakdown.time_to_result)
+    const writeS = (s.write_elapsed != null) ? s.write_elapsed
+                 : (s.score && s.score.breakdown && s.score.breakdown.time_to_result)
                    ? parseFloat(s.score.breakdown.time_to_result.detail) : s.elapsed;
     stopWriteTimer(isNaN(writeS) ? s.elapsed : writeS);
-    if (s.critique && s.review_elapsed != null) stopReviewTimer(s.review_elapsed);
+    if (s.review_elapsed != null) stopReviewTimer(s.review_elapsed);
     else document.getElementById('timerReview').className = 'timer idle';
+  } else if (s.status === 'reviewing') {
+    // Page loaded mid-review: freeze WRITING at stored write_elapsed, run REVIEWING
+    // forward from when the review actually started.
+    stopWriteTimer(s.write_elapsed != null ? s.write_elapsed : s.elapsed);
+    startReviewTimer();
+    // back-date the review clock to the real review start if we can
+    if (s.completed_at && s.write_elapsed != null && s.started_at) {
+      const reviewStartedMs = (s.started_at + s.write_elapsed) * 1000;
+      if (reviewStartedMs && reviewStartedMs < Date.now()) reviewStartMs = reviewStartedMs;
+    }
   } else {
     startWriteTimer();
   }

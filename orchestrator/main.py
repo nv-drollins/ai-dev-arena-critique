@@ -428,8 +428,12 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
     # objective score — the critic gives a verdict + findings but does NOT move
     # the number. Runs the big 70B model TP=2 across both Sparks (the headline).
     if CRITIC_ENABLED:
+        # write_elapsed = time spent writing + testing (everything before review).
+        # The Arena freezes the WRITING clock here and starts the REVIEWING clock.
+        review_start = time.time()
+        s["write_elapsed"] = elapsed
         await broadcast("critiquing", "Sending to the reviewer (70B, across both Sparks)…",
-                        score=score)
+                        score=score, write_elapsed=elapsed)
         try:
             critique = await run_critic(
                 challenge=challenge,
@@ -444,7 +448,9 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
             await broadcast("warning", f"Critic call failed: {e}")
         s["critique"] = critique
         s["status"] = "completed"
-        await broadcast("completed", "Review complete!", score=score, critique=critique)
+        s["review_elapsed"] = time.time() - review_start
+        await broadcast("completed", "Review complete!", score=score, critique=critique,
+                        write_elapsed=elapsed, review_elapsed=s["review_elapsed"])
     else:
         await broadcast("completed", "Demo complete!", score=score)
 
