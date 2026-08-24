@@ -86,8 +86,42 @@ async function launch(){
     document.getElementById('status').textContent =
       `live · challenge ${CHALLENGE||'?'} · session ${SID}`;
     msg.textContent = CH_META[CHALLENGE]?.hint || 'Both apps are live — interact and compare.';
+    // If the challenge is still running, the AFTER app was spawned from code the
+    // writer hasn't finished editing yet — so watch for completion and refresh it.
+    watchForCompletion();
   }catch(e){ msg.textContent = 'Failed: ' + e; }
   btn.disabled = false;
+}
+
+// Poll the session; once it completes, respawn the AFTER app from the now-edited
+// code and reload only the after iframe so it reflects the AI's final solution.
+let _watched = false;
+async function watchForCompletion(){
+  if (_watched) return; _watched = true;
+  const msg = document.getElementById('startMsg');
+  for (let i = 0; i < 150; i++){          // ~10 min ceiling
+    let st = '';
+    try{ const r = await fetch('/api/session/'+SID); const s = await r.json(); st = s.status; }
+    catch(e){}
+    if (st === 'completed' || st === 'fallback'){
+      msg.textContent = 'Challenge finished — refreshing the After Fix app…';
+      try{
+        // respawn only AFTER (picks up the writer's edited code); reload its iframe.
+        const r = await fetch(`/api/session/${SID}/live-app?role=after`, {method:'POST'});
+        const d = await r.json();
+        mount('after', d.after);
+        document.getElementById('status').textContent =
+          `live · challenge ${CHALLENGE||'?'} · session ${SID} · ✓ complete`;
+        msg.textContent = CH_META[CHALLENGE]?.hint || 'After Fix updated with the AI\u2019s solution.';
+      }catch(e){ msg.textContent = 'Refresh failed: ' + e; }
+      return;
+    }
+    if (st === 'running' || st === 'reviewing' || st === 'critiquing'){
+      document.getElementById('status').textContent =
+        `live · challenge ${CHALLENGE||'?'} · ${st}…`;
+    }
+    await new Promise(r => setTimeout(r, 4000));
+  }
 }
 
 // Per-challenge labels so the split view frames the RIGHT before/after story.
@@ -118,7 +152,13 @@ function mount(role, inst){
   if (!inst || !inst.port){ load.textContent = 'could not start ' + role; return; }
   const api = `http://${HOST}:${inst.port}`;
   const ch = CHALLENGE ? `&challenge=${CHALLENGE}` : '';
-  frame.src = `/storefront?api=${encodeURIComponent(api)}&state=${role}${ch}`;
+  // cache-buster so re-mounting forces a reload even when the port is reused
+  // (respawned apps can land on the same freed port → identical src wouldn't reload)
+  const bust = `&t=${Date.now()}`;
+  const url = `/storefront?api=${encodeURIComponent(api)}&state=${role}${ch}${bust}`;
+  // blank first, then set — guarantees the iframe navigates even if URL matches
+  frame.src = 'about:blank';
+  requestAnimationFrame(() => { frame.src = url; });
   frame.style.display = 'block'; load.style.display = 'none';
 }
 

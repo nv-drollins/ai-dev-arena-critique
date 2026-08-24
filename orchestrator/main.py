@@ -1025,17 +1025,26 @@ async def get_session(session_id: str):
 # --- Live App (spawn the real Flask app: before + after the AI's edit) ---
 
 @app.post("/api/session/{session_id}/live-app")
-async def start_live_app(session_id: str):
-    """Spawn the BEFORE (pristine) and AFTER (edited) app instances and return ports."""
+async def start_live_app(session_id: str, role: str = "both"):
+    """Spawn app instances and return ports.
+
+    role=both (default) → (re)spawn BEFORE (pristine) and AFTER (edited).
+    role=after           → respawn only AFTER (e.g. after the challenge completes,
+                           to pick up the writer's final edited code).
+    role=before          → respawn only BEFORE.
+    """
     from orchestrator import live_apps
     session = sessions.get(session_id)
     if not session:
         return {"error": "Session not found"}, 404
     work_dir = Path(session["work_dir"])
     loop = asyncio.get_running_loop()
-    before = await loop.run_in_executor(None, live_apps.start_before, session_id, work_dir)
-    after = await loop.run_in_executor(None, live_apps.start_after, session_id, work_dir)
-    return {"before": before, "after": after}
+    out = {}
+    if role in ("both", "before"):
+        out["before"] = await loop.run_in_executor(None, live_apps.start_before, session_id, work_dir)
+    if role in ("both", "after"):
+        out["after"] = await loop.run_in_executor(None, live_apps.start_after, session_id, work_dir)
+    return out
 
 
 @app.get("/api/session/{session_id}/live-app")
