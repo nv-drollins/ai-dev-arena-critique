@@ -80,12 +80,36 @@ async function launch(){
   try{
     const r = await fetch(`/api/session/${SID}/live-app`, {method:'POST'});
     const d = await r.json();
+    applyChallengeLabels();
     mount('before', d.before);
     mount('after', d.after);
-    document.getElementById('status').textContent = 'live · session ' + SID;
-    msg.textContent = 'Both apps are live. Add products, type SAVE10, and compare.';
+    document.getElementById('status').textContent =
+      `live · challenge ${CHALLENGE||'?'} · session ${SID}`;
+    msg.textContent = CH_META[CHALLENGE]?.hint || 'Both apps are live — interact and compare.';
   }catch(e){ msg.textContent = 'Failed: ' + e; }
   btn.disabled = false;
+}
+
+// Per-challenge labels so the split view frames the RIGHT before/after story.
+const CH_META = {
+  A: {sub:'Add products, type promo SAVE10, and compare the total.',
+      before:'— promo code does nothing', after:'— the AI added working promo logic',
+      hint:'Add a product, type SAVE10 in both. BEFORE: no discount. AFTER: 10% off.'},
+  B: {sub:'Search orders by status with an empty query, and compare results.',
+      before:'— status filter is ignored (the bug)', after:'— the AI fixed the filter',
+      hint:'Pick a status, leave the query empty, Search. BEFORE returns every status; AFTER only the one you picked.'},
+  C: {sub:'Load the dashboard and watch the render time.',
+      before:'— slow O(n²) render', after:'— the AI optimized it',
+      hint:'Click "Load dashboard" in both. BEFORE takes ~2s; AFTER is near-instant.'},
+  D: {sub:'Look up a customer\u2019s loyalty tier.',
+      before:'— no loyalty program', after:'— the AI added tiers + discounts',
+      hint:'Type a customer (e.g. Grace) and Check tier. BEFORE has no endpoint; AFTER shows their tier + discount.'},
+};
+function applyChallengeLabels(){
+  const m = CH_META[CHALLENGE]; if(!m) return;
+  document.querySelector('header .sub').textContent = m.sub;
+  document.querySelector('.pane.before .hint').textContent = m.before;
+  document.querySelector('.pane.after .hint').textContent = m.after;
 }
 
 function mount(role, inst){
