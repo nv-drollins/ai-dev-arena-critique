@@ -488,8 +488,13 @@ RULES:
                         # Writer output is small (patch JSON). Cap well under
                         # the model's context so prompt+output never overflows
                         # (Lightning-30B ctx=32768; 32000 output overflowed → 400).
-                        "max_tokens": int(os.environ.get("WRITER_MAX_TOKENS", "8192")),
-                        "temperature": 0.1,
+                        # Lightning is a REASONING model — it needs room to think
+                        # (CoT) AND emit the JSON. With --reasoning-parser the CoT
+                        # goes to a separate 'reasoning' field, but it still counts
+                        # against max_tokens. 8192 was too small (finish=length before
+                        # any JSON). ctx=32768, prompt ~6-8k → give ~22k for gen.
+                        "max_tokens": int(os.environ.get("WRITER_MAX_TOKENS", "22000")),
+                        "temperature": float(os.environ.get("WRITER_TEMP", "0.6")),
                     },
                     timeout=900,
                 ) as resp:

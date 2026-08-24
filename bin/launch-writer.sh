@@ -55,6 +55,7 @@ _run() {
     --host 0.0.0.0 --port "$WRITER_PORT" \
     --tensor-parallel-size "$WRITER_TP" \
     --trust-remote-code \
+    --reasoning-parser nemotron_v3 \
     --gpu-memory-utilization "$WRITER_GPU_FRAC" \
     --max-model-len "$WRITER_MAXLEN" \
     --max-num-seqs 2 \
