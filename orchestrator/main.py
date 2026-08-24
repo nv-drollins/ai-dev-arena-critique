@@ -382,16 +382,38 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
         return None
 
     def _py_ok(fname: str, content: str) -> bool:
-        """True if content is safe to write: valid Python for .py files, always
-        OK for non-Python. Guards against patches that corrupt syntax/indent."""
+        """True if content is safe to write. For .py files: must parse AND (for
+        app.py) import cleanly — catches syntax errors, bad indentation, and
+        runtime import failures like Flask's duplicate-endpoint error from a
+        writer that adds a route without removing the old one."""
         if not fname.endswith(".py"):
             return True
         import ast as _ast
         try:
             _ast.parse(content)
-            return True
         except SyntaxError:
             return False
+        if fname != "app.py":
+            return True   # test files: parse is enough (canonical restore grades)
+        # Import-smoke app.py in a subprocess so Flask route/decorator errors surface.
+        import tempfile, subprocess, os as _os, sys as _sys
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False,
+                                         dir=str(work_dir / "sample-app")) as tf:
+            tf.write(content); tmp = tf.name
+        try:
+            r = subprocess.run(
+                [_sys.executable, "-c", f"import importlib.util,sys;"
+                 f"spec=importlib.util.spec_from_file_location('_probe',r'{tmp}');"
+                 f"m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)"],
+                cwd=str(work_dir / "sample-app"), capture_output=True,
+                text=True, timeout=15,
+            )
+            return r.returncode == 0
+        except Exception:
+            return False
+        finally:
+            try: _os.unlink(tmp)
+            except OSError: pass
 
     # Post-apply guard: a valid solution MUST actually change a non-test file.
     # If the model's patch search strings don't match (or it only touched
