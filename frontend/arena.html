@@ -18,6 +18,11 @@ body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color
 .logo { font-size: 22px; font-weight: 800; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 
 .timer { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); transition: color .3s; }
+.timers { display: flex; gap: 28px; align-items: center; }
+.timer-group { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.05; }
+.timer-label { font-size: 10px; letter-spacing: 1.5px; color: var(--muted); font-weight: 700; }
+.timer.idle { color: var(--muted); opacity: .5; }
+.timer.running { color: var(--accent); }
 .timer.warning { color: var(--yellow); }
 .timer.danger { color: var(--red); }
 .timer.final { color: var(--green, #3fb950); }
@@ -108,7 +113,16 @@ body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color
 
 <div class="top-bar">
   <div class="logo">⚡ AI DEV ARENA</div>
-  <div class="timer" id="timer">--:--</div>
+  <div class="timers">
+    <div class="timer-group">
+      <div class="timer-label">✍️ WRITING</div>
+      <div class="timer" id="timerWrite">--:--</div>
+    </div>
+    <div class="timer-group">
+      <div class="timer-label">🔎 REVIEWING</div>
+      <div class="timer" id="timerReview">--:--</div>
+    </div>
+  </div>
 </div>
 
 <div class="main-grid">
@@ -220,7 +234,11 @@ let ws = null;
 let sid = null;
 let sess = null;   // session object from /api/session/{id}
 let connectMs = null;
-let timerId = null;
+// Two independent clocks: writing (writer + tests) and reviewing (the 70B critic).
+let writeTimerId = null, reviewTimerId = null;
+let writeStartMs = null, reviewStartMs = null;
+let writeFrozen = false, reviewFrozen = false;
+let CRITIC_MAYBE = true;   // set from telemetry: is a reviewing phase expected?
 
 /* ---- helpers ---- */
 function addLog(msg, elapsed) {
@@ -255,21 +273,52 @@ function setScore(sc) {
     if (bd[k]) el.textContent = bd[k].score+'/'+bd[k].max;
   }
 }
-function stopTimerAt(seconds) {
-  if (timerId) { clearInterval(timerId); timerId = null; }
-  if (seconds != null) {
-    const el = document.getElementById('timer');
-    const e = Math.max(0, Math.floor(seconds));
-    el.textContent = String(Math.floor(e/60)).padStart(2,'0')+':'+String(e%60).padStart(2,'0');
-    el.className = 'timer final';
-  }
+function fmt(sec){ const e=Math.max(0,Math.floor(sec)); return String(Math.floor(e/60)).padStart(2,'0')+':'+String(e%60).padStart(2,'0'); }
+function paint(id, sec, cls){ const el=document.getElementById(id); if(!el) return; el.textContent=fmt(sec); el.className='timer '+cls; }
+
+// Writing clock: runs from connect until the score arrives (writer + tests done).
+function startWriteTimer(){
+  if (writeTimerId) return;
+  writeStartMs = Date.now(); writeFrozen = false;
+  writeTimerId = setInterval(tickWrite, 250); tickWrite();
 }
-function setTimer() {
-  if (!connectMs) return;
-  const e = Math.max(0, Math.floor((Date.now()-connectMs)/1000));
-  const el = document.getElementById('timer');
-  el.textContent = String(Math.floor(e/60)).padStart(2,'0')+':'+String(e%60).padStart(2,'0');
-  el.className = 'timer'+( e>240?' danger' : e>180?' warning': '');
+function tickWrite(){
+  if (writeFrozen || writeStartMs == null) return;
+  const e=(Date.now()-writeStartMs)/1000;
+  paint('timerWrite', e, e>90?'danger':e>45?'warning':'running');
+}
+function stopWriteTimer(seconds){
+  if (writeTimerId){ clearInterval(writeTimerId); writeTimerId=null; }
+  writeFrozen = true;
+  const e = (seconds!=null) ? seconds : (writeStartMs? (Date.now()-writeStartMs)/1000 : 0);
+  paint('timerWrite', e, 'final');
+}
+
+// Reviewing clock: starts when the critic phase begins, stops on completion.
+function startReviewTimer(){
+  if (reviewTimerId || reviewFrozen) return;
+  reviewStartMs = Date.now();
+  reviewTimerId = setInterval(tickReview, 250); tickReview();
+}
+function tickReview(){
+  if (reviewFrozen || reviewStartMs == null) return;
+  const e=(Date.now()-reviewStartMs)/1000;
+  paint('timerReview', e, e>150?'danger':e>90?'warning':'running');
+}
+function stopReviewTimer(seconds){
+  if (reviewTimerId){ clearInterval(reviewTimerId); reviewTimerId=null; }
+  reviewFrozen = true;
+  const e = (seconds!=null) ? seconds : (reviewStartMs? (Date.now()-reviewStartMs)/1000 : 0);
+  paint('timerReview', e, 'final');
+}
+function resetTimers(){
+  if (writeTimerId){ clearInterval(writeTimerId); writeTimerId=null; }
+  if (reviewTimerId){ clearInterval(reviewTimerId); reviewTimerId=null; }
+  writeStartMs=reviewStartMs=null; writeFrozen=reviewFrozen=false;
+  document.getElementById('timerWrite').textContent='--:--';
+  document.getElementById('timerWrite').className='timer idle';
+  document.getElementById('timerReview').textContent='--:--';
+  document.getElementById('timerReview').className='timer idle';
 }
 
 /* ---- Cluster gauges (scalable: renders one card per Spark) ---- */
@@ -312,6 +361,7 @@ async function updateCluster() {
                nodeLines(m.nodes);
       };
       const w = d.models && d.models.writer, c = d.models && d.models.critic;
+      CRITIC_MAYBE = !!c;   // a reviewing phase is expected only if a critic exists
       if (w || c) {
         mb.innerHTML = block('✍️', w) + block('🔎', c);
       } else {
@@ -379,19 +429,28 @@ function onEvent(ev) {
     else if (/FAIL|ERROR/.test(ev.terminal_output)) line.classList.add('fail');
     t.appendChild(line); t.scrollTop = t.scrollHeight;
   }
-  if (ev.score) { setScore(ev.score); stopTimerAt(ev.elapsed); }
+  // The critic phase begins → freeze the writing clock, start the reviewing clock.
+  if (ev.phase === 'critiquing') { stopWriteTimer(); startReviewTimer(); }
+  if (ev.score) {
+    setScore(ev.score);
+    // score means writer+tests are done. Freeze writing at the score's elapsed.
+    stopWriteTimer(ev.elapsed);
+    // if a review is coming (critic enabled), kick off the review clock now.
+    if (CRITIC_MAYBE) startReviewTimer();
+  }
   // live reviewer stream (heartbeat preview while the 70B thinks)
   if (ev.critique_stream !== undefined) {
+    startReviewTimer();   // ensure it's running once tokens flow
     document.getElementById('critiqueArea').style.display = 'block';
     const st = document.getElementById('critiqueStream');
     st.style.display = 'block';
     st.textContent = ev.critique_stream;
     st.scrollTop = st.scrollHeight;
   }
-  // final structured critique
-  if (ev.critique) renderCritique(ev.critique);
-  if (ev.phase === 'completed') stopTimerAt(ev.elapsed);
-  if (ev.phase === 'error') stopTimerAt(ev.elapsed);
+  // final structured critique → review is done
+  if (ev.critique) { renderCritique(ev.critique); stopReviewTimer(); }
+  if (ev.phase === 'completed') { stopWriteTimer(); stopReviewTimer(); }
+  if (ev.phase === 'error') { stopWriteTimer(); stopReviewTimer(); }
 }
 
 function renderCritique(c) {
@@ -424,7 +483,7 @@ function renderCritique(c) {
 /* ---- onSessionReady shows the UI ---- */
 function resetView() {
   // Clear all per-run state so a NEW run starts clean (no stale score/phase/timer).
-  if (timerId) { clearInterval(timerId); timerId = null; }
+  resetTimers();
   connectMs = null;
   feed.innerHTML = '';
   document.getElementById('tests').innerHTML = '';
@@ -446,9 +505,7 @@ function resetView() {
   if (ph) { ph.textContent = PHASE_MAP['inspecting'] || 'Inspecting'; ph.className = 'phase-name'; }
   const pmsg = document.getElementById('phMsg');
   if (pmsg) pmsg.textContent = '';
-  // Reset timer element to --:-- neutral
-  const el = document.getElementById('timer');
-  if (el) { el.textContent = '00:00'; el.className = 'timer'; }
+  // (timers reset by resetTimers() above)
   // Reset score ring + breakdown
   const ring = document.getElementById('ring');
   if (ring) { ring.style.strokeDashoffset = '427.3'; ring.style.stroke = 'var(--accent)'; }
@@ -464,12 +521,18 @@ function onSessionReady(s) {
   document.getElementById('activeUI').style.display = 'flex';
   feed.innerHTML = '';
   if (s.challenge_id) load(s.challenge_id);
-  // Back-calc connectMs from elapsed
-  if (s.started_at) connectMs = new Date(s.started_at*1000).getTime();
-  if (!timerId) { timerId = setInterval(setTimer, 1000); setTimer(); }
-  // If the session already finished, freeze the clock at final time
+  // Whether a reviewing phase is expected (critic enabled). Read once from config.
+  // Falls back to true so the review clock isn't hidden if config is unavailable.
+  // Start the WRITING clock now (writer + tests are the first phase).
   if (s.status === 'completed' || s.status === 'failed' || s.status === 'error') {
-    stopTimerAt(s.elapsed);
+    // Already-finished session: show the split from stored timings, don't run clocks.
+    const writeS = (s.score && s.score.breakdown && s.score.breakdown.time_to_result)
+                   ? parseFloat(s.score.breakdown.time_to_result.detail) : s.elapsed;
+    stopWriteTimer(isNaN(writeS) ? s.elapsed : writeS);
+    if (s.critique && s.review_elapsed != null) stopReviewTimer(s.review_elapsed);
+    else document.getElementById('timerReview').className = 'timer idle';
+  } else {
+    startWriteTimer();
   }
   // WS connect
   if (ws) ws.close();
