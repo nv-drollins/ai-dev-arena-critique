@@ -52,17 +52,35 @@ def score_session(session: dict) -> dict:
         time_score = 0
     breakdown["time_to_result"] = {"score": time_score, "max": weights["time_to_result"], "detail": f"{elapsed:.0f}s elapsed"}
 
-    # 2. Test pass rate (25 pts)
+    # 2. Test pass rate (25 pts) — count INDIVIDUAL tests, not whole commands, so
+    # partial success is scored fairly (a command with 8/9 passing isn't a 0).
     test_results = session.get("test_results", [])
     check_results = session.get("check_results", [])
     all_checks = test_results + check_results
-    if all_checks:
-        passed = sum(1 for r in all_checks if r.get("passed", False))
-        rate = passed / len(all_checks)
+    import re as _re
+    ind_pass = ind_total = 0
+    for r in all_checks:
+        out = r.get("output", "") or ""
+        p = _re.search(r"(\d+)\s+passed", out)
+        f = _re.search(r"(\d+)\s+failed", out)
+        e = _re.search(r"(\d+)\s+error", out)
+        cp = int(p.group(1)) if p else 0
+        cf = (int(f.group(1)) if f else 0) + (int(e.group(1)) if e else 0)
+        if cp or cf:
+            ind_pass += cp; ind_total += cp + cf
+        else:
+            # non-pytest check (e.g. a CLI --check): fall back to its exit status
+            ind_total += 1
+            if r.get("passed", False):
+                ind_pass += 1
+    if ind_total:
+        passed = ind_pass
+        rate = ind_pass / ind_total
         test_score = int(rate * weights["test_pass_rate"])
+        detail = f"{ind_pass}/{ind_total} passed"
     else:
-        test_score = 0
-    breakdown["test_pass_rate"] = {"score": test_score, "max": weights["test_pass_rate"], "detail": f"{passed}/{len(all_checks)} passed"}
+        passed = 0; test_score = 0; detail = "0/0 passed"
+    breakdown["test_pass_rate"] = {"score": test_score, "max": weights["test_pass_rate"], "detail": detail}
 
     # 3. Code quality / review (20 pts)
     # Proxy: number of changes × structure of changes
