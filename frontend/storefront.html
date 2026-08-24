@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>ShopCart — Live Demo Storefront</title>
+<style>
+  :root{--bg:#0f141b;--card:#161d27;--line:#232d3a;--txt:#e6edf3;--muted:#8b97a6;
+        --accent:#4ade80;--accent2:#38bdf8;--warn:#fbbf24}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--txt)}
+  header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+  header .logo{font-weight:800;font-size:18px;letter-spacing:.5px}
+  header .tag{font-size:11px;color:var(--muted);border:1px solid var(--line);padding:2px 8px;border-radius:20px}
+  .wrap{display:grid;grid-template-columns:1fr 340px;gap:18px;padding:20px;max-width:1000px;margin:0 auto}
+  @media(max-width:820px){.wrap{grid-template-columns:1fr}}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:0 0 12px}
+  .products{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .product{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .product .name{font-weight:600;margin-bottom:2px}
+  .product .cat{font-size:11px;color:var(--muted);text-transform:capitalize}
+  .product .row{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
+  .product .price{font-weight:700;color:var(--accent2)}
+  button{background:var(--accent2);color:#04121e;border:0;border-radius:7px;padding:7px 12px;
+         font-weight:700;cursor:pointer;font-size:13px}
+  button:hover{filter:brightness(1.1)}
+  button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
+  .cart{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;position:sticky;top:20px}
+  .citem{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13px}
+  .citem .q{color:var(--muted)}
+  .promo{display:flex;gap:8px;margin:14px 0}
+  .promo input{flex:1;background:#0c1017;border:1px solid var(--line);border-radius:7px;color:var(--txt);
+               padding:8px 10px;font-size:13px;text-transform:uppercase}
+  .totals{margin-top:12px;border-top:1px solid var(--line);padding-top:12px}
+  .totals .line{display:flex;justify-content:space-between;padding:3px 0}
+  .totals .discount{color:var(--accent)}
+  .totals .grand{font-size:18px;font-weight:800;margin-top:6px}
+  .msg{font-size:12px;margin-top:8px;min-height:16px}
+  .msg.ok{color:var(--accent)} .msg.no{color:var(--warn)}
+  .empty{color:var(--muted);font-size:13px;padding:10px 0}
+  .badge{font-size:10px;padding:2px 7px;border-radius:5px;margin-left:auto}
+  .badge.before{background:#3a1e1e;color:#f87171} .badge.after{background:#12331f;color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">🛒 ShopCart</span>
+  <span class="tag" id="apiTag">connecting…</span>
+  <span class="badge" id="stateBadge"></span>
+</header>
+<div class="wrap">
+  <div>
+    <h2>Products</h2>
+    <div class="products" id="products"><div class="empty">Loading…</div></div>
+  </div>
+  <div>
+    <h2>Your Cart</h2>
+    <div class="cart">
+      <div id="cartItems"><div class="empty">Cart is empty — add a product.</div></div>
+      <div class="promo">
+        <input id="promo" placeholder="Promo code (try SAVE10)" />
+        <button id="applyBtn">Apply</button>
+      </div>
+      <div class="totals" id="totals" style="display:none">
+        <div class="line"><span>Subtotal</span><span id="subtotal">$0.00</span></div>
+        <div class="line discount" id="discountLine" style="display:none">
+          <span>Discount (<span id="promoLabel"></span>)</span><span id="discount">-$0.00</span></div>
+        <div class="line grand"><span>Total</span><span id="grand">$0.00</span></div>
+      </div>
+      <div class="msg" id="msg"></div>
+      <button class="ghost" id="clearBtn" style="width:100%;margin-top:10px">Clear cart</button>
+    </div>
+  </div>
+</div>
+<script>
+// API base: ?api=http://host:port  (the live BEFORE or AFTER Flask instance)
+const params = new URLSearchParams(location.search);
+const API = (params.get('api') || '').replace(/\/$/,'');
+const STATE = params.get('state') || '';   // 'before' | 'after' | ''
+document.getElementById('apiTag').textContent = API || 'no API set';
+if (STATE) {
+  const b = document.getElementById('stateBadge');
+  b.textContent = STATE === 'before' ? 'BEFORE FIX' : 'AFTER FIX';
+  b.className = 'badge ' + STATE;
+}
+
+let cart = {};      // product_id -> {name, price, qty}
+let PRODUCTS = [];
+
+async function api(path, opts){ const r = await fetch(API+path, opts); return r.json(); }
+
+async function loadProducts(){
+  try{
+    const d = await api('/api/products');
+    PRODUCTS = d.products || d || [];
+    const el = document.getElementById('products');
+    el.innerHTML = '';
+    PRODUCTS.forEach(p=>{
+      const div = document.createElement('div'); div.className='product';
+      div.innerHTML = `<div class="name">${p.name}</div><div class="cat">${p.category||''}</div>
+        <div class="row"><span class="price">$${p.price.toFixed(2)}</span>
+        <button data-id="${p.id}">Add</button></div>`;
+      div.querySelector('button').onclick = ()=>addToCart(p);
+      el.appendChild(div);
+    });
+  }catch(e){ document.getElementById('products').innerHTML =
+    `<div class="empty">Could not reach the app API.<br>${e}</div>`; }
+}
+
+function addToCart(p){
+  if(!cart[p.id]) cart[p.id] = {name:p.name, price:p.price, qty:0};
+  cart[p.id].qty++;
+  renderCart(); checkout();
+}
+function renderCart(){
+  const el = document.getElementById('cartItems');
+  const ids = Object.keys(cart);
+  if(!ids.length){ el.innerHTML = '<div class="empty">Cart is empty — add a product.</div>';
+    document.getElementById('totals').style.display='none'; return; }
+  el.innerHTML = ids.map(id=>{const c=cart[id];
+    return `<div class="citem"><span>${c.name} <span class="q">×${c.qty}</span></span>
+            <span>$${(c.price*c.qty).toFixed(2)}</span></div>`;}).join('');
+}
+
+// Calls the REAL app: POST /api/cart with items + promo_code. The BEFORE app
+// ignores the promo (no discount); the AFTER app applies it. This is the payoff.
+async function checkout(){
+  const items = Object.entries(cart).map(([id,c])=>({product_id:+id, quantity:c.qty}));
+  if(!items.length) return;
+  const promo = document.getElementById('promo').value.trim().toUpperCase();
+  const msg = document.getElementById('msg');
+  try{
+    const d = await api('/api/cart', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({items, promo_code: promo})});
+    const sub = d.subtotal ?? 0, total = d.total ?? sub;
+    const disc = +(sub - total).toFixed(2);
+    document.getElementById('totals').style.display='block';
+    document.getElementById('subtotal').textContent = '$'+sub.toFixed(2);
+    document.getElementById('grand').textContent = '$'+total.toFixed(2);
+    const dl = document.getElementById('discountLine');
+    if(disc > 0){ dl.style.display='flex';
+      document.getElementById('discount').textContent = '-$'+disc.toFixed(2);
+      document.getElementById('promoLabel').textContent = promo;
+      msg.className='msg ok'; msg.textContent = `✓ Promo "${promo}" applied — you saved $${disc.toFixed(2)}!`;
+    } else { dl.style.display='none';
+      if(promo){ msg.className='msg no'; msg.textContent = `Promo "${promo}" had no effect (not recognized).`; }
+      else msg.textContent='';
+    }
+  }catch(e){ msg.className='msg no'; msg.textContent = 'Checkout failed: '+e; }
+}
+
+document.getElementById('applyBtn').onclick = checkout;
+document.getElementById('promo').addEventListener('keydown',e=>{if(e.key==='Enter')checkout();});
+document.getElementById('clearBtn').onclick = ()=>{cart={};renderCart();
+  document.getElementById('msg').textContent='';document.getElementById('promo').value='';};
+
+loadProducts();
+</script>
+</body>
+</html>

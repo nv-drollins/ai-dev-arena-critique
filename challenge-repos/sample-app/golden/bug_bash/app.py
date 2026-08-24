@@ -240,5 +240,13 @@ if __name__ == "__main__":
             sys.exit(0)
 
     else:
-        # Default: run the app
-        app.run(host="0.0.0.0", port=5000, debug=True)
+        # Default: run the app. Port from $PORT (Arena runs before/after instances).
+        import os as _os
+        _port = int(_os.environ.get("PORT", "5000"))
+        @app.after_request
+        def _cors(resp):
+            resp.headers["Access-Control-Allow-Origin"] = "*"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+            resp.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+            return resp
+        app.run(host="0.0.0.0", port=_port, debug=False)

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Live App — Before vs After</title>
+<style>
+  :root{--bg:#0b0f14;--line:#232d3a;--txt:#e6edf3;--muted:#8b97a6;--accent:#4ade80;--warn:#f87171}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;height:100vh;display:flex;flex-direction:column}
+  header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px}
+  header h1{font-size:16px;margin:0;font-weight:800;letter-spacing:.4px}
+  header .sub{font-size:12px;color:var(--muted)}
+  header .status{margin-left:auto;font-size:12px;color:var(--muted)}
+  .split{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:0;min-height:0}
+  .pane{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
+  .pane:last-child{border-right:0}
+  .pane-head{padding:8px 16px;font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
+             display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line)}
+  .pane.before .pane-head{background:#1a0f0f;color:var(--warn)}
+  .pane.after  .pane-head{background:#0d1f14;color:var(--accent)}
+  .pane iframe{flex:1;width:100%;border:0;background:#0f141b}
+  .hint{font-size:11px;font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0}
+  .loading{padding:40px;text-align:center;color:var(--muted)}
+  .startbar{padding:10px 22px;border-top:1px solid var(--line);display:flex;gap:12px;align-items:center;font-size:13px}
+  button{background:#38bdf8;color:#04121e;border:0;border-radius:7px;padding:8px 16px;font-weight:700;cursor:pointer}
+  button:disabled{opacity:.5;cursor:default}
+</style>
+</head>
+<body>
+<header>
+  <h1>🖥️ Live Application</h1>
+  <span class="sub">The actual app — before the AI's change vs. after. Try promo code <b>SAVE10</b>.</span>
+  <span class="status" id="status">idle</span>
+</header>
+<div class="split">
+  <div class="pane before">
+    <div class="pane-head">⬅ BEFORE FIX <span class="hint">— promo code does nothing</span></div>
+    <div class="loading" id="beforeLoad">Not started</div>
+    <iframe id="beforeFrame" style="display:none"></iframe>
+  </div>
+  <div class="pane after">
+    <div class="pane-head">AFTER FIX ➡ <span class="hint">— the AI's version</span></div>
+    <div class="loading" id="afterLoad">Not started</div>
+    <iframe id="afterFrame" style="display:none"></iframe>
+  </div>
+</div>
+<div class="startbar">
+  <button id="startBtn">▶ Launch live apps</button>
+  <span id="startMsg" style="color:var(--muted)"></span>
+</div>
+<script>
+const params = new URLSearchParams(location.search);
+let SID = params.get('session_id') || '';
+// host the browser can reach the spawned Flask apps on (same host as this page)
+const HOST = location.hostname;
+
+async function resolveSession(){
+  if (SID) return SID;
+  try{ const r = await fetch('/api/running-session'); const d = await r.json();
+    if (d.session_id) { SID = d.session_id; } }catch(e){}
+  return SID;
+}
+
+async function launch(){
+  const btn = document.getElementById('startBtn');
+  const msg = document.getElementById('startMsg');
+  await resolveSession();
+  if (!SID){ msg.textContent = 'No active session — run a challenge first.'; return; }
+  btn.disabled = true; msg.textContent = 'Spawning before + after app instances…';
+  document.getElementById('status').textContent = 'starting…';
+  try{
+    const r = await fetch(`/api/session/${SID}/live-app`, {method:'POST'});
+    const d = await r.json();
+    mount('before', d.before);
+    mount('after', d.after);
+    document.getElementById('status').textContent = 'live · session ' + SID;
+    msg.textContent = 'Both apps are live. Add products, type SAVE10, and compare.';
+  }catch(e){ msg.textContent = 'Failed: ' + e; }
+  btn.disabled = false;
+}
+
+function mount(role, inst){
+  const load = document.getElementById(role+'Load');
+  const frame = document.getElementById(role+'Frame');
+  if (!inst || !inst.port){ load.textContent = 'could not start ' + role; return; }
+  const api = `http://${HOST}:${inst.port}`;
+  frame.src = `/storefront?api=${encodeURIComponent(api)}&state=${role}`;
+  frame.style.display = 'block'; load.style.display = 'none';
+}
+
+document.getElementById('startBtn').onclick = launch;
+// auto-launch if a session is already running
+resolveSession().then(s => { if (s) launch(); });
+</script>
+</body>
+</html>

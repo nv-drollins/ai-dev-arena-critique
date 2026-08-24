@@ -16,6 +16,9 @@ websockets>=12.0
 # Testing
 pytest>=8.0
 
+# The sample checkout app (run live per session for the /live before-vs-after view)
+flask>=3.0
+
 # Optional — only if you enable a `gpt-oss`-based `--llm` backend switch
 # (not used today; kept for future)
 # openai>=1.40

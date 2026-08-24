@@ -989,7 +989,36 @@ async def get_session(session_id: str):
     return s
 
 
-# --- Frontend serving ---
+# --- Live App (spawn the real Flask app: before + after the AI's edit) ---
+
+@app.post("/api/session/{session_id}/live-app")
+async def start_live_app(session_id: str):
+    """Spawn the BEFORE (pristine) and AFTER (edited) app instances and return ports."""
+    from orchestrator import live_apps
+    session = sessions.get(session_id)
+    if not session:
+        return {"error": "Session not found"}, 404
+    work_dir = Path(session["work_dir"])
+    loop = asyncio.get_running_loop()
+    before = await loop.run_in_executor(None, live_apps.start_before, session_id, work_dir)
+    after = await loop.run_in_executor(None, live_apps.start_after, session_id, work_dir)
+    return {"before": before, "after": after}
+
+
+@app.get("/api/session/{session_id}/live-app")
+async def live_app_status(session_id: str):
+    from orchestrator import live_apps
+    return live_apps.status(session_id)
+
+
+@app.delete("/api/session/{session_id}/live-app")
+async def stop_live_app(session_id: str):
+    from orchestrator import live_apps
+    live_apps.stop(session_id)
+    return {"stopped": True}
+
+
+
 
 import jinja2
 from fastapi.responses import HTMLResponse
@@ -1013,3 +1042,18 @@ async def theater_page(session_id: str = ""):
 async def operator_page():
     template = env.get_template("operator.html")
     return HTMLResponse(template.render(challenges=CHALLENGES))
+
+
+@app.get("/storefront")
+async def storefront_page():
+    """The real shopping-cart storefront UI. Point it at a live app instance via
+    ?api=http://host:port&state=before|after (used inside the /live split view)."""
+    return HTMLResponse((BASE_DIR / "frontend" / "storefront.html").read_text())
+
+
+@app.get("/live")
+async def live_page(session_id: str = ""):
+    """Split view: the actual app BEFORE vs AFTER the AI's edit, both live."""
+    template = env.get_template("live.html")
+    return HTMLResponse(template.render(session_id=session_id))
+
