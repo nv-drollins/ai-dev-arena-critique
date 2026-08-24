@@ -55,10 +55,18 @@ let SID = params.get('session_id') || '';
 // host the browser can reach the spawned Flask apps on (same host as this page)
 const HOST = location.hostname;
 
+let CHALLENGE = (params.get('challenge') || '').toUpperCase();
 async function resolveSession(){
-  if (SID) return SID;
+  if (SID && CHALLENGE) return SID;
   try{ const r = await fetch('/api/running-session'); const d = await r.json();
-    if (d.session_id) { SID = d.session_id; } }catch(e){}
+    if (d.session_id) { SID = SID || d.session_id; }
+    if (d.challenge_id) { CHALLENGE = CHALLENGE || String(d.challenge_id).toUpperCase(); }
+  }catch(e){}
+  // if we have a session_id but no challenge, ask the session directly
+  if (SID && !CHALLENGE){
+    try{ const r2 = await fetch('/api/session/'+SID); const s = await r2.json();
+      if (s.challenge_id) CHALLENGE = String(s.challenge_id).toUpperCase(); }catch(e){}
+  }
   return SID;
 }
 
@@ -85,7 +93,8 @@ function mount(role, inst){
   const frame = document.getElementById(role+'Frame');
   if (!inst || !inst.port){ load.textContent = 'could not start ' + role; return; }
   const api = `http://${HOST}:${inst.port}`;
-  frame.src = `/storefront?api=${encodeURIComponent(api)}&state=${role}`;
+  const ch = CHALLENGE ? `&challenge=${CHALLENGE}` : '';
+  frame.src = `/storefront?api=${encodeURIComponent(api)}&state=${role}${ch}`;
   frame.style.display = 'block'; load.style.display = 'none';
 }
 

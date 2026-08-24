@@ -70,7 +70,40 @@
       <div class="msg" id="msg"></div>
       <button class="ghost" id="clearBtn" style="width:100%;margin-top:10px">Clear cart</button>
     </div>
+    <!-- D: loyalty lookup (only shown for challenge D) -->
+    <div class="panel" id="loyaltyPanel" style="display:none">
+      <h2>Loyalty Lookup</h2>
+      <div class="cart">
+        <div class="promo">
+          <input id="custInput" placeholder="Customer (e.g. Alice)" />
+          <button id="custBtn">Check tier</button>
+        </div>
+        <div id="loyaltyOut" class="msg"></div>
+      </div>
+    </div>
   </div>
+</div>
+<!-- B: order search (only shown for challenge B) -->
+<div class="challenge-panel" id="searchPanel" style="display:none;max-width:1000px;margin:0 auto;padding:0 20px 24px">
+  <h2>Order Search <span style="font-weight:400;color:var(--muted);text-transform:none">— filter by status with an empty query (the bug)</span></h2>
+  <div style="display:flex;gap:8px;margin-bottom:12px">
+    <input id="searchQ" placeholder="Search query (leave empty)" style="flex:1;background:#0c1017;border:1px solid var(--line);border-radius:7px;color:var(--txt);padding:8px 10px"/>
+    <select id="searchStatus" style="background:#0c1017;border:1px solid var(--line);border-radius:7px;color:var(--txt);padding:8px">
+      <option value="">any status</option><option>delivered</option><option>shipped</option>
+      <option>processing</option><option>cancelled</option>
+    </select>
+    <button id="searchBtn">Search</button>
+  </div>
+  <div id="searchOut"></div>
+</div>
+<!-- C: dashboard performance (only shown for challenge C) -->
+<div class="challenge-panel" id="dashPanel" style="display:none;max-width:1000px;margin:0 auto;padding:0 20px 24px">
+  <h2>Dashboard <span style="font-weight:400;color:var(--muted);text-transform:none">— render time is the whole point</span></h2>
+  <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px">
+    <button id="dashBtn">Load dashboard (n=6000)</button>
+    <span id="dashTimer" style="font-size:20px;font-weight:800"></span>
+  </div>
+  <div id="dashOut" class="msg"></div>
 </div>
 <script>
 // API base: ?api=http://host:port  (the live BEFORE or AFTER Flask instance)
@@ -167,6 +200,86 @@ document.getElementById('applyBtn').onclick = checkout;
 document.getElementById('promo').addEventListener('keydown',e=>{if(e.key==='Enter')checkout();});
 document.getElementById('clearBtn').onclick = ()=>{cart={};renderCart();
   document.getElementById('msg').textContent='';document.getElementById('promo').value='';};
+
+// ---- Challenge-specific views (B: search, C: dashboard, D: loyalty) ----
+const CHALLENGE = (params.get('challenge') || '').toUpperCase();
+
+// B — order search: empty query + status filter. The bug: on the un-fixed app,
+// GET /api/orders?query=&status=X IGNORES the status filter (returns all orders);
+// the fixed app returns only the matching status.
+async function runSearch(){
+  const q = encodeURIComponent(document.getElementById('searchQ').value);
+  const status = document.getElementById('searchStatus').value;
+  const out = document.getElementById('searchOut');
+  out.innerHTML = '<div class="empty">Searching…</div>';
+  try{
+    const d = await api(`/api/orders?query=${q}&status=${encodeURIComponent(status)}`);
+    const rows = d.orders || [];
+    // Highlight whether the status filter was actually respected
+    const offStatus = status ? rows.filter(o=>o.status!==status) : [];
+    const banner = !status
+      ? `${d.count} order(s)`
+      : offStatus.length
+        ? `<span style="color:var(--warn)">⚠ ${d.count} returned, but ${offStatus.length} are NOT "${status}" — the filter was ignored (the bug).</span>`
+        : `<span style="color:var(--accent)">✓ ${d.count} order(s), all "${status}" — filter works.</span>`;
+    out.innerHTML = `<div style="margin-bottom:8px">${banner}</div>`
+      + rows.map(o=>`<div class="citem"><span>#${o.id} ${o.customer}</span>
+          <span class="q" style="${status&&o.status!==status?'color:var(--warn)':''}">${o.status} · $${o.total}</span></div>`).join('');
+  }catch(e){
+    out.innerHTML = `<div class="empty" style="color:var(--warn)">✗ The app returned an error:<br>${e.message||e}
+      <br><br>(The un-fixed app can crash or mis-filter on empty search + status.)</div>`;
+  }
+}
+
+// C — dashboard: time the real request. BEFORE is O(n²) slow; AFTER is fast.
+async function runDashboard(){
+  const btn=document.getElementById('dashBtn'), t=document.getElementById('dashTimer'),
+        out=document.getElementById('dashOut');
+  btn.disabled=true; out.textContent=''; t.textContent='⏱ …';
+  const started=performance.now();
+  try{
+    const d = await api('/api/dashboard?n=6000');
+    const ms = Math.round(performance.now()-started);
+    t.style.color = ms > 1500 ? 'var(--warn)' : 'var(--accent)';
+    t.textContent = (ms/1000).toFixed(2)+'s';
+    out.className='msg '+(ms>1500?'no':'ok');
+    out.textContent = `Rendered ${d.count} rows in ${ms} ms `
+      + (ms>1500 ? '— slow (O(n²) render). This is what the AI must fix.' : '— fast! The AI optimized the render.');
+  }catch(e){ t.textContent=''; out.className='msg no'; out.textContent='Failed: '+(e.message||e); }
+  btn.disabled=false;
+}
+
+// D — loyalty: look up a customer's tier (new endpoint the AI adds).
+async function runLoyalty(){
+  const cust=document.getElementById('custInput').value.trim();
+  const out=document.getElementById('loyaltyOut');
+  if(!cust){ out.textContent=''; return; }
+  out.textContent='Looking up…';
+  try{
+    const d = await api('/api/loyalty/'+encodeURIComponent(cust));
+    out.className='msg ok';
+    out.innerHTML = `<b>${d.customer}</b> — spent $${d.total_spent} → `
+      + `<b style="color:var(--accent)">${d.tier}</b> (${d.discount_pct}% off)`;
+  }catch(e){
+    out.className='msg no';
+    out.innerHTML = `No loyalty program yet.<br><span style="color:var(--muted)">`
+      + `(The un-fixed app has no /api/loyalty endpoint — the AI adds it.)</span>`;
+  }
+}
+
+// Show the right panel for the active challenge; hide cart/promo where irrelevant.
+(function setupChallenge(){
+  const show = id => { const e=document.getElementById(id); if(e) e.style.display='block'; };
+  const hide = id => { const e=document.getElementById(id); if(e) e.style.display='none'; };
+  const promoPh = document.getElementById('promo');
+  if(CHALLENGE==='B'){ show('searchPanel'); document.getElementById('searchBtn').onclick=runSearch; }
+  else if(CHALLENGE==='C'){ show('dashPanel'); document.getElementById('dashBtn').onclick=runDashboard; }
+  else if(CHALLENGE==='D'){
+    show('loyaltyPanel'); document.getElementById('custBtn').onclick=runLoyalty;
+    if(promoPh) promoPh.placeholder='Customer name for loyalty (in cart, use customer field)';
+  }
+  // A (and default): the promo cart is already the main view — nothing to toggle.
+})();
 
 loadProducts();
 </script>
