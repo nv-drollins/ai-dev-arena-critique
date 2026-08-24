@@ -302,7 +302,56 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
             except asyncio.CancelledError:
                 pass
 
-    # Handle model response — apply patches or full-file replacement
+    # Handle model response — apply patches or full-file replacement.
+    # Patch application uses two stages to survive the writer's search-strings
+    # quoting code with slightly different whitespace/indent:
+    def _normalise_block(text):
+        """Collapse vertical whitespace so blocks match even when line-counts differ."""
+        import re as _re
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        return "\n".join(lines)
+
+    def _fuzzy_replace(original: str, search_block: str, replace_block: str) -> str | None:
+        """Try to locate search_block in original using normalised whitespace
+        line-by-line and replace with replace_block.  Returns new text or None."""
+        import re as _re
+        # Build a normalised "signature" for the search block (one token per non-empty line)
+        sig = _normalise_block(search_block).splitlines()
+        lines = original.splitlines(True)  # keep \n so replacement lands whole-lines
+        best = None; best_pos = best_len = -1
+
+        def score(win):
+            # compare normalised window against signature (Levenshtein-ish char ratio)
+            w_sig = _normalise_block("".join(win)).splitlines()
+            if not w_sig and not sig: return 0.0
+            s1, s2 = "".join(w_sig), "".join(sig)
+            # fast Jaccard on words
+            u1, u2 = set(_re.findall(r"\w+", s1)), set(_re.findall(r"\w+", s2))
+            if not (u1 or u2): return 0.5
+            return len(u1 & u2) / len(u1 | u2)
+
+        for pos in range(len(lines)):
+            for win_len in range(max(2, len(sig)), min(len(sig)+6, len(lines)-pos)+1):
+                window = lines[pos:pos+win_len]
+                s = score(window)
+                if s >= 0.78 and (best is None or (s > best) or (s == best and win_len < best_len)):
+                    best = s; best_pos, best_len = pos, win_len
+
+        if best is not None:
+            new_lines = lines[:best_pos] + replace_block.splitlines(True) + lines[best_pos+best_len:]
+            # Ensure trailing newline
+            txt = "".join(new_lines)
+            if original.endswith("\n") and not txt.endswith("\n"):
+                txt += "\n"
+            return txt
+
+        # Last resort — if the replacement is a full-file replacement and search
+        # is ~70%+ of the file content, allow direct swap.
+        if len(_normalise_block(search_block)) / max(len(_normalise_block(original)),1) > 0.5:
+            return replace_block
+
+        return None
+
     # Post-apply guard: a valid solution MUST actually change a non-test file.
     # If the model's patch search strings don't match (or it only touched
     # tests), we revert and use the golden fallback rather than ship a
@@ -310,7 +359,7 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
     solved = False
 
     if response and response.get("patches"):
-        # Phase 4a: Apply targeted patches
+        # Phase 4a: Apply targeted patches — exact first, then fuzzy fallback
         await broadcast("editing", f"Applying {len(response['patches'])} patch(es)...", diff="")
         for patch in response["patches"]:
             target_file = patch.get("file", "app.py")
@@ -322,9 +371,16 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
             try:
                 current = fp.read_text()
                 if search_text in current:
+                    # Stage 1: exact substring match (fast path)
                     new_content = current.replace(search_text, replace_text, 1)
                     fp.write_text(new_content)
-                    changes.append({"file": target_file, "type": "modified"})
+                    changes.append({"file": target_file, "type": "patch-exact"})
+                else:
+                    # Stage 2: fuzzy replacement to survive whitespace/token drift
+                    fuzzy = _fuzzy_replace(current, search_text, replace_text)
+                    if fuzzy and fuzzy != current:
+                        fp.write_text(fuzzy)
+                        changes.append({"file": target_file, "type": "patch-fuzzy"})
             except Exception as ep:
                 await broadcast("warning", f"Failed to apply patch for {target_file}: {ep}", terminal_output=str(ep)[:200])
 
