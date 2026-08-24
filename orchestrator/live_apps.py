@@ -19,15 +19,54 @@ from pathlib import Path
 _PORT_BASE = int(os.environ.get("LIVE_APP_PORT_BASE", "5100"))
 _PORT_MAX = _PORT_BASE + 40
 
-# session_id -> {"before": {proc, port}, "after": {proc, port}}
+# session_id -> {"before": {proc, port, ts}, "after": {proc, port, ts}}
 _LIVE: dict[str, dict] = {}
+
+# Keep at most this many sessions' live apps alive at once; evict the oldest
+# (LRU) when a new session needs ports. Prevents the port pool from exhausting
+# (each session uses 2 ports; pool is ~40, so ~18 sessions max — but demos only
+# ever need the current one, so a small cap is plenty and self-heals).
+_MAX_LIVE_SESSIONS = int(os.environ.get("LIVE_APP_MAX_SESSIONS", "3"))
+
+
+def _reap_dead():
+    """Drop bookkeeping for processes that have already exited."""
+    for sid, roles in list(_LIVE.items()):
+        for role in ("before", "after"):
+            inst = roles.get(role)
+            if inst and inst.get("proc") and inst["proc"].poll() is not None:
+                roles[role] = None
+        if not roles.get("before") and not roles.get("after"):
+            _LIVE.pop(sid, None)
+
+
+def _evict_oldest(keep_session: str):
+    """If too many sessions hold live apps, stop the oldest ones (never keep_session)."""
+    def newest_ts(roles):
+        return max((r.get("ts", 0) for r in roles.values() if r), default=0)
+    while len([s for s in _LIVE if s != keep_session]) >= _MAX_LIVE_SESSIONS:
+        victims = sorted((s for s in _LIVE if s != keep_session),
+                         key=lambda s: newest_ts(_LIVE[s]))
+        if not victims:
+            break
+        stop(victims[0])
 
 
 def _free_port() -> int:
+    _reap_dead()
     for p in range(_PORT_BASE, _PORT_MAX):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             if s.connect_ex(("127.0.0.1", p)) != 0:   # nothing listening
                 return p
+    # Pool looks full — evict the oldest tracked session and retry once.
+    tracked = sorted(_LIVE.keys(),
+                     key=lambda s: max((r.get("ts", 0) for r in _LIVE[s].values() if r), default=0))
+    if tracked:
+        stop(tracked[0])
+        for p in range(_PORT_BASE, _PORT_MAX):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                if s.connect_ex(("127.0.0.1", p)) != 0:
+                    return p
     raise RuntimeError("no free port in live-app pool")
 
 
@@ -53,11 +92,12 @@ def _wait_ready(port: int, timeout: float = 12.0) -> bool:
 def start_after(session_id: str, work_dir: Path) -> dict:
     """Start (or restart) the AFTER instance from the session's current app.py."""
     _stop_one(session_id, "after")
+    _evict_oldest(session_id)   # free ports from stale sessions if the pool is tight
     app_dir = Path(work_dir) / "sample-app"
     port = _free_port()
     proc = _spawn(app_dir, port)
     ready = _wait_ready(port)
-    _LIVE.setdefault(session_id, {})["after"] = {"proc": proc, "port": port}
+    _LIVE.setdefault(session_id, {})["after"] = {"proc": proc, "port": port, "ts": time.time()}
     return {"port": port, "ready": ready}
 
 
@@ -97,7 +137,7 @@ def start_before(session_id: str, work_dir: Path) -> dict:
     port = _free_port()
     proc = _spawn(before_dir, port)
     ready = _wait_ready(port)
-    _LIVE.setdefault(session_id, {})["before"] = {"proc": proc, "port": port}
+    _LIVE.setdefault(session_id, {})["before"] = {"proc": proc, "port": port, "ts": time.time()}
     return {"port": port, "ready": ready}
 
 

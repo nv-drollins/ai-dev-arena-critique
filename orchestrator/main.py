@@ -1046,10 +1046,14 @@ async def start_live_app(session_id: str, role: str = "both"):
     work_dir = Path(session["work_dir"])
     loop = asyncio.get_running_loop()
     out = {}
-    if role in ("both", "before"):
-        out["before"] = await loop.run_in_executor(None, live_apps.start_before, session_id, work_dir)
-    if role in ("both", "after"):
-        out["after"] = await loop.run_in_executor(None, live_apps.start_after, session_id, work_dir)
+    try:
+        if role in ("both", "before"):
+            out["before"] = await loop.run_in_executor(None, live_apps.start_before, session_id, work_dir)
+        if role in ("both", "after"):
+            out["after"] = await loop.run_in_executor(None, live_apps.start_after, session_id, work_dir)
+    except Exception as e:
+        # Never leak a 500/plain-text body to the frontend (it expects JSON).
+        return {"error": f"live-app spawn failed: {e}", "before": out.get("before"), "after": out.get("after")}
     return out
 
 
