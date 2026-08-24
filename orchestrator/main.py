@@ -338,19 +338,60 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
                     best = s; best_pos, best_len = pos, win_len
 
         if best is not None:
-            new_lines = lines[:best_pos] + replace_block.splitlines(True) + lines[best_pos+best_len:]
-            # Ensure trailing newline
+            # Re-indent the replacement so its base indent matches the matched
+            # location — the writer often quotes the block at column 0 while the
+            # real code is nested, which would produce an IndentationError.
+            def _base_indent(block_lines):
+                for l in block_lines:
+                    if l.strip():
+                        return len(l) - len(l.lstrip())
+                return 0
+            matched_indent = _base_indent(lines[best_pos:best_pos+best_len])
+            rep_lines = replace_block.splitlines(True)
+            rep_indent = _base_indent(rep_lines)
+            shift = matched_indent - rep_indent
+            if shift > 0:
+                rep_lines = [(" " * shift + l if l.strip() else l) for l in rep_lines]
+            elif shift < 0:
+                cut = -shift
+                rep_lines = [(l[cut:] if l[:cut].isspace() else l.lstrip() if l.strip() else l) for l in rep_lines]
+
+            new_lines = lines[:best_pos] + rep_lines + lines[best_pos+best_len:]
             txt = "".join(new_lines)
             if original.endswith("\n") and not txt.endswith("\n"):
                 txt += "\n"
+            # Safety: never ship a fuzzy result that doesn't parse — fall through
+            # to the golden fallback instead of corrupting app.py.
+            import ast as _ast
+            try:
+                _ast.parse(txt)
+            except SyntaxError:
+                return None
             return txt
 
         # Last resort — if the replacement is a full-file replacement and search
-        # is ~70%+ of the file content, allow direct swap.
+        # is ~70%+ of the file content, allow direct swap (parse-checked).
         if len(_normalise_block(search_block)) / max(len(_normalise_block(original)),1) > 0.5:
-            return replace_block
+            import ast as _ast
+            try:
+                _ast.parse(replace_block)
+                return replace_block
+            except SyntaxError:
+                return None
 
         return None
+
+    def _py_ok(fname: str, content: str) -> bool:
+        """True if content is safe to write: valid Python for .py files, always
+        OK for non-Python. Guards against patches that corrupt syntax/indent."""
+        if not fname.endswith(".py"):
+            return True
+        import ast as _ast
+        try:
+            _ast.parse(content)
+            return True
+        except SyntaxError:
+            return False
 
     # Post-apply guard: a valid solution MUST actually change a non-test file.
     # If the model's patch search strings don't match (or it only touched
@@ -373,12 +414,20 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
                 if search_text in current:
                     # Stage 1: exact substring match (fast path)
                     new_content = current.replace(search_text, replace_text, 1)
-                    fp.write_text(new_content)
-                    changes.append({"file": target_file, "type": "patch-exact"})
+                    if _py_ok(target_file, new_content):
+                        fp.write_text(new_content)
+                        changes.append({"file": target_file, "type": "patch-exact"})
+                    else:
+                        # exact match but the replacement breaks Python — try fuzzy
+                        # (which re-indents), else skip so we don't ship broken code
+                        fuzzy = _fuzzy_replace(current, search_text, replace_text)
+                        if fuzzy and fuzzy != current and _py_ok(target_file, fuzzy):
+                            fp.write_text(fuzzy)
+                            changes.append({"file": target_file, "type": "patch-fuzzy"})
                 else:
                     # Stage 2: fuzzy replacement to survive whitespace/token drift
                     fuzzy = _fuzzy_replace(current, search_text, replace_text)
-                    if fuzzy and fuzzy != current:
+                    if fuzzy and fuzzy != current and _py_ok(target_file, fuzzy):
                         fp.write_text(fuzzy)
                         changes.append({"file": target_file, "type": "patch-fuzzy"})
             except Exception as ep:
