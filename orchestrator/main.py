@@ -98,6 +98,21 @@ def load_challenges():
 CHALLENGES = load_challenges()
 
 
+def restore_canonical_tests(work_dir: Path):
+    """Overwrite the session's tests/ with the pristine canonical tests so a
+    writer's broken test-file edit can't corrupt grading. app.py is left alone."""
+    src_tests = REPOS_DIR / "sample-app" / "tests"
+    dst_tests = work_dir / "sample-app" / "tests"
+    if not src_tests.exists():
+        return
+    try:
+        for f in src_tests.iterdir():
+            if f.is_file() and f.suffix == ".py":
+                shutil.copy2(f, dst_tests / f.name)
+    except Exception:
+        pass
+
+
 # --- Repo management ---
 
 def reset_repo(work_dir: Path, challenge_id: str):
@@ -357,6 +372,12 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
         await broadcast("warning", "Agent did not ship a solvable change. Use ⚡ Fallback to rescue, or let it validate as-is.")
 
     # Phase 5: Validation
+    # Grade against the PRISTINE test files, not the writer-editable ones. The
+    # writer is allowed to touch tests/, and a broken test-file edit (e.g. a
+    # syntax error) would otherwise crash pytest collection and tank EVERY test
+    # → wild score swings. Restore canonical tests so grading is deterministic;
+    # the writer's app.py (the real work) is untouched.
+    restore_canonical_tests(work_dir)
     await broadcast("testing", word("testing") or "Running test suite and validation checks...")
     test_results = await run_validation(work_dir, challenge)
 
