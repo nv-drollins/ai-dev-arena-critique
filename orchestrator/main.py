@@ -797,17 +797,41 @@ async def run_validation(work_dir: Path, challenge: dict):
     return results
 
 
+def _test_pass_fraction(test_results: list) -> float:
+    """Fraction of INDIVIDUAL tests that passed, parsed from pytest output.
+    Falls back to command-level pass ratio if per-test counts aren't found."""
+    import re
+    passed = failed = 0
+    for r in test_results:
+        out = r.get("output", "") or ""
+        # pytest summary line: "X passed", "Y failed", "Z errors"
+        p = re.search(r"(\d+)\s+passed", out)
+        f = re.search(r"(\d+)\s+failed", out)
+        e = re.search(r"(\d+)\s+error", out)
+        if p: passed += int(p.group(1))
+        if f: failed += int(f.group(1))
+        if e: failed += int(e.group(1))     # collection errors count as failures
+    total = passed + failed
+    if total > 0:
+        return passed / total
+    # fallback: fraction of commands that exited 0
+    if test_results:
+        return sum(1 for r in test_results if r.get("passed")) / len(test_results)
+    return 0.0
+
+
 def detect_fulfilled_requirements(challenge: dict, test_results: list) -> list[bool]:
-    """Detect which requirements were fulfilled based on test/check results."""
-    # Simple heuristic: if all tests pass ≈ all requirements met
-    all_pass = all(r.get("passed", False) for r in test_results) if test_results else False
-    if challenge["id"] == "A":
-        return [all_pass, all_pass, all_pass]  # 3 requirements
-    elif challenge["id"] == "B":
-        return [all_pass, all_pass]  # 2 requirements
-    elif challenge["id"] == "C":
-        return [all_pass, all_pass]  # 2 requirements
-    return [all_pass]
+    """Requirements fulfilled ∝ fraction of individual tests passing (partial credit).
+
+    Previously all-or-nothing (all tests pass → all reqs met), which zeroed out
+    requirement_completeness whenever even one edge-case test failed — capping
+    otherwise-good runs. Now N requirements get round(frac * N) marked fulfilled,
+    so a 2/3 pass rate yields proportional credit.
+    """
+    n_req = {"A": 3, "B": 2, "C": 2, "D": 3}.get(challenge["id"], 1)
+    frac = _test_pass_fraction(test_results)
+    n_met = round(frac * n_req)
+    return [i < n_met for i in range(n_req)]
 
 
 # --- WebSocket ---
