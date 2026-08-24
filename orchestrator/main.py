@@ -113,6 +113,70 @@ def restore_canonical_tests(work_dir: Path):
         pass
 
 
+def _critique_to_feedback(review: dict, test_results: list) -> str:
+    """Distill the reviewer's structured critique + failing-test output into a
+    compact, actionable feedback string for the writer's repair attempt."""
+    if not isinstance(review, dict):
+        return ""
+    parts = []
+    summary = (review.get("summary") or "").strip()
+    if summary:
+        parts.append(f"Reviewer summary: {summary}")
+    for f in (review.get("findings") or [])[:5]:
+        if isinstance(f, dict):
+            note = f.get("note") or f.get("detail") or f.get("issue") or ""
+            kind = f.get("kind") or f.get("severity") or ""
+            if note:
+                parts.append(f"- [{kind}] {note}" if kind else f"- {note}")
+        elif isinstance(f, str):
+            parts.append(f"- {f}")
+    # Include the tail of any failing test output so the writer sees the exact error.
+    for t in test_results:
+        if not t.get("passed"):
+            out = (t.get("output") or "").strip().splitlines()
+            tail = [l for l in out if any(k in l for k in ("Error", "assert", "FAILED", "error"))][-4:]
+            if tail:
+                parts.append("Failing test output:\n" + "\n".join(tail))
+            break
+    return "\n".join(parts)[:1800]
+
+
+def _apply_patches(response: dict, work_dir: Path, py_ok, fuzzy_replace) -> list:
+    """Apply search/replace patches from a writer response, guarded so a patch
+    that breaks Python (syntax/indent/import) is skipped. Returns the list of
+    applied changes [{file, type}]. Shared by the first pass and the repair loop."""
+    changes = []
+    if not (response and response.get("patches")):
+        return changes
+    for patch in response["patches"]:
+        target_file = patch.get("file", "app.py")
+        search_text = patch.get("search", "").rstrip()
+        replace_text = patch.get("replace", "").rstrip()
+        if not search_text:
+            continue
+        fp = work_dir / "sample-app" / target_file
+        try:
+            current = fp.read_text()
+            if search_text in current:
+                new_content = current.replace(search_text, replace_text, 1)
+                if py_ok(target_file, new_content):
+                    fp.write_text(new_content)
+                    changes.append({"file": target_file, "type": "patch-exact"})
+                else:
+                    fz = fuzzy_replace(current, search_text, replace_text)
+                    if fz and fz != current and py_ok(target_file, fz):
+                        fp.write_text(fz)
+                        changes.append({"file": target_file, "type": "patch-fuzzy"})
+            else:
+                fz = fuzzy_replace(current, search_text, replace_text)
+                if fz and fz != current and py_ok(target_file, fz):
+                    fp.write_text(fz)
+                    changes.append({"file": target_file, "type": "patch-fuzzy"})
+        except Exception:
+            continue
+    return changes
+
+
 # --- Repo management ---
 
 def reset_repo(work_dir: Path, challenge_id: str):
@@ -532,6 +596,94 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
 
     score = score_session(s)
 
+    # ── Review-repair loop (Fully Live only) ────────────────────────────────
+    # If the writer's first attempt scored below target, run the reviewer NOW,
+    # feed its findings back to the writer for ONE repair attempt, then re-apply
+    # / re-validate / re-score. Keep whichever attempt scored higher. This is the
+    # writer↔critic feedback loop — it lets the 70B's review actually improve the
+    # result instead of just narrating it. Guardrailed/replay are unaffected.
+    REPAIR_TARGET = int(os.environ.get("LIVE_REPAIR_TARGET", "85"))
+    MAX_REPAIRS = int(os.environ.get("LIVE_MAX_REPAIRS", "1"))
+    repair_attempt = 0
+    while (mode == "live" and CRITIC_ENABLED
+           and score.get("overall", 0) < REPAIR_TARGET
+           and repair_attempt < MAX_REPAIRS):
+        repair_attempt += 1
+        await broadcast("critiquing",
+            f"Score {score.get('overall')} < {REPAIR_TARGET} — reviewer is generating fix guidance (attempt {repair_attempt})…",
+            score=score, write_elapsed=(time.time() - start_time))
+
+        # 1) Get the reviewer's findings on the current diff.
+        try:
+            review = await run_critic(challenge=challenge, diff=diff_for_scoring,
+                                      test_results=test_results, broadcast=broadcast)
+        except Exception as e:
+            await broadcast("warning", f"Reviewer unavailable for repair: {e}")
+            break
+        feedback = _critique_to_feedback(review, test_results)
+        if not feedback:
+            break
+
+        # 2) Snapshot current state so we can revert if the repair is worse.
+        prev_score, prev_changes = score, list(changes)
+        subprocess.run(["git", "stash", "push", "-q", "-m", f"repair-{repair_attempt}"],
+                       cwd=work_dir / "sample-app", capture_output=True, timeout=10)
+
+        # 3) Ask the writer again WITH the feedback.
+        await broadcast("editing", f"Writer is applying reviewer feedback (attempt {repair_attempt})…")
+        cur_app = (work_dir / "sample-app" / "app.py").read_text()
+        cur_test = (work_dir / "sample-app" / "tests" / "test_app.py").read_text()
+        repair_resp = await call_llm(prompt, file_list, cur_app, cur_test,
+                                     repair_feedback=feedback)
+
+        # 4) Apply the repair patches (same guarded apply as the first pass).
+        repair_changes = _apply_patches(repair_resp, work_dir, _py_ok, _fuzzy_replace)
+        src_applied = [c for c in repair_changes if "test" not in c["file"]]
+        if not src_applied:
+            # repair produced nothing usable — restore the previous attempt
+            subprocess.run(["git", "stash", "pop", "-q"], cwd=work_dir / "sample-app",
+                           capture_output=True, timeout=10)
+            await broadcast("editing", "Repair produced no usable change — keeping first attempt.")
+            break
+
+        # 5) Re-validate + re-score the repaired code.
+        restore_canonical_tests(work_dir)
+        new_tests = await run_validation(work_dir, challenge)
+        new_diff = subprocess.run(["git", "diff"], cwd=work_dir / "sample-app",
+                                  capture_output=True, text=True, timeout=10).stdout
+        s["test_results"] = [t for t in new_tests if "pytest" in t["command"]]
+        s["check_results"] = [t for t in new_tests if "pytest" not in t["command"]]
+        s["changes"] = repair_changes
+        s["diff_size"] = len(new_diff); s["diff"] = new_diff
+        s["fulfilled_requirements"] = detect_fulfilled_requirements(challenge, new_tests)
+        new_score = score_session(s)
+
+        # 6) Keep the better of the two.
+        if new_score.get("overall", 0) >= prev_score.get("overall", 0):
+            score = new_score; changes = repair_changes
+            test_results = new_tests; diff_for_scoring = new_diff
+            # drop the stash (we're keeping the repaired working tree)
+            subprocess.run(["git", "stash", "drop", "-q"], cwd=work_dir / "sample-app",
+                           capture_output=True, timeout=10)
+            await broadcast("edited",
+                f"Repair improved the score: {prev_score.get('overall')} → {new_score.get('overall')}.",
+                diff=new_diff, score=new_score)
+        else:
+            # repair was worse — revert to the first attempt
+            subprocess.run(["git", "checkout", "--", "."], cwd=work_dir / "sample-app",
+                           capture_output=True, timeout=10)
+            subprocess.run(["git", "stash", "pop", "-q"], cwd=work_dir / "sample-app",
+                           capture_output=True, timeout=10)
+            score, changes = prev_score, prev_changes
+            s["test_results"] = [t for t in test_results if "pytest" in t["command"]]
+            s["check_results"] = [t for t in test_results if "pytest" not in t["command"]]
+            s["changes"] = changes; s["diff"] = diff_for_scoring; s["diff_size"] = len(diff_for_scoring)
+            s["fulfilled_requirements"] = detect_fulfilled_requirements(challenge, test_results)
+            await broadcast("edited",
+                f"Repair scored lower ({new_score.get('overall')}) — kept the first attempt ({prev_score.get('overall')}).",
+                score=prev_score)
+            break
+
     # Guardrailed rescue (score-gated): if the writer's own solution scored below
     # the bar, apply the golden solution and re-validate/re-score. Genuinely good
     # writer runs (>= threshold) are kept as-is — the AI gets real credit.
@@ -605,14 +757,31 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
     return score
 
 
-async def call_llm(prompt_task: str, file_list: str, app_code: str, test_code: str):
+async def call_llm(prompt_task: str, file_list: str, app_code: str, test_code: str,
+                   repair_feedback: str = ""):
     """Call vLLM via OpenAI-compatible API.
 
     Sends full code context, asks for targeted search/replace patches.
     Output is small (200-500 tokens) = 10-25s at Nemotron's ~19 tok/s.
+
+    repair_feedback: when set, this is a SECOND attempt — the reviewer's findings
+    on the first attempt are injected so the writer fixes what it got wrong.
     """
     from aiohttp import ClientSession, TCPConnector
     import re
+
+    repair_block = ""
+    if repair_feedback:
+        repair_block = f"""
+
+⚠️ THIS IS A REPAIR ATTEMPT. Your previous change was reviewed and did NOT fully
+pass. Address this reviewer feedback precisely — do not repeat the same mistake:
+{repair_feedback}
+
+Common fixes: if a route/function already exists, MODIFY it in place (do not add a
+duplicate — Flask raises 'View function mapping is overwriting an existing endpoint').
+Make sure your patch.search targets the EXISTING code so it actually applies.
+"""
 
     meta_prompt = f"""You are a software engineer modifying a Flask web application.
 
@@ -628,7 +797,7 @@ FULL tests/test_app.py ({len(test_code)} chars):
 
 TASK:
 {prompt_task}
-
+{repair_block}
 Return ONLY a valid JSON object:
 {{
   "reasoning_summary": "Brief explanation of what you changed",
