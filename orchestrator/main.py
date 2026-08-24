@@ -345,25 +345,11 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
         await broadcast("edited", "Changes applied.", diff=diff_output, files_changed=changes_info)
         solved = True
 
+    # NOTE: Guardrailed rescue happens AFTER scoring now (score-gated), so a
+    # genuinely good writer solution is kept and only weak runs get the golden.
+    # Here we only handle the pure-failure messaging for the two modes.
     if not solved and mode != "replay" and mode == "guardrailed":
-        # Guardrailed: auto-rescue with the golden branch solution
-        await broadcast("warning", "Agent response unusable — guardrails kicking in, applying fallback solution.")
-        golden_branch = challenge.get("golden_branch", "")
-        golden_target = REPOS_DIR / "sample-app" / golden_branch
-        repo_target = work_dir / "sample-app"
-        if golden_target.exists():
-            for item in golden_target.iterdir():
-                dst = repo_target / item.name
-                if item.is_file():
-                    import shutil
-                    shutil.copy2(item, dst)
-                    changes.append({"file": item.name, "type": "modified"})
-        diff_output = subprocess.run(
-            ["git", "diff"], cwd=work_dir / "sample-app",
-            capture_output=True, text=True, timeout=10
-        ).stdout
-        changes_info = [{"file": c["file"], "type": c["type"]} for c in changes]
-        await broadcast("edited", "Fallback solution applied.", diff=diff_output, files_changed=changes_info)
+        await broadcast("warning", "Agent solution incomplete — will guard-rail after scoring if it falls short.")
     elif not solved and mode != "replay" and mode == "live":
         # Live: honest outcome — the model's work stays as-is (or was reverted
         # if it was test-only). Press ⚡ Fallback to rescue, or let it validate
@@ -397,6 +383,43 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
     s["scoring_weights"] = challenge.get("scoring_weights", {})
 
     score = score_session(s)
+
+    # Guardrailed rescue (score-gated): if the writer's own solution scored below
+    # the bar, apply the golden solution and re-validate/re-score. Genuinely good
+    # writer runs (>= threshold) are kept as-is — the AI gets real credit.
+    GUARDRAIL_MIN = int(os.environ.get("GUARDRAIL_MIN_SCORE", "85"))
+    if mode == "guardrailed" and score.get("overall", 0) < GUARDRAIL_MIN:
+        await broadcast("warning",
+            f"Score {score.get('overall')} below {GUARDRAIL_MIN} — applying golden solution (guardrail).")
+        golden_branch = challenge.get("golden_branch", "")
+        golden_target = REPOS_DIR / "sample-app" / golden_branch
+        repo_target = work_dir / "sample-app"
+        if golden_target.exists():
+            import shutil
+            for item in golden_target.iterdir():
+                if item.is_file():
+                    shutil.copy2(item, repo_target / item.name)
+            if not any(c["file"] == "app.py" for c in changes):
+                changes.append({"file": "app.py", "type": "modified"})
+        # re-validate + re-score against the golden
+        test_results = await run_validation(work_dir, challenge)
+        for tr in test_results:
+            st = "✅ PASS" if tr["passed"] else "❌ FAIL"
+            await broadcast("testing", f"{st}: {tr['command']}", terminal_output=tr.get("output", "")[:500])
+        diff_for_scoring = subprocess.run(
+            ["git", "diff"], cwd=work_dir / "sample-app",
+            capture_output=True, text=True, timeout=10).stdout
+        s["test_results"] = [t for t in test_results if "pytest" in t["command"]]
+        s["check_results"] = [t for t in test_results if "pytest" not in t["command"]]
+        s["changes"] = changes
+        s["diff_size"] = len(diff_for_scoring)
+        s["diff"] = diff_for_scoring
+        s["fulfilled_requirements"] = detect_fulfilled_requirements(challenge, test_results)
+        score = score_session(s)
+        await broadcast("edited", "Golden solution applied (guardrail).",
+                        diff=diff_for_scoring,
+                        files_changed=[{"file": c["file"], "type": c["type"]} for c in changes])
+
     s["score"] = score
     s["status"] = "reviewing" if CRITIC_ENABLED else "completed"
     s["completed_at"] = time.time()

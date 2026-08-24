@@ -72,14 +72,28 @@ def start_before(session_id: str, work_dir: Path) -> dict:
     import shutil
     src = Path(work_dir) / "sample-app"
     before_dir = Path(work_dir) / "sample-app-before"
-    if not before_dir.exists():
-        # snapshot the pristine (baseline) tree from git HEAD of the session repo
-        shutil.copytree(src, before_dir, dirs_exist_ok=True)
-        try:
-            subprocess.run(["git", "checkout", "--", "app.py"], cwd=str(before_dir),
-                           capture_output=True, timeout=10)
-        except Exception:
-            pass
+    # Always (re)build the BEFORE tree so it reflects the true pristine baseline,
+    # never the writer's edits. Copy the session tree for structure, then restore
+    # app.py + tests to the git baseline (HEAD = pre-edit "baseline" commit).
+    if before_dir.exists():
+        shutil.rmtree(before_dir, ignore_errors=True)
+    shutil.copytree(src, before_dir, dirs_exist_ok=True)
+    # Restore the pristine app.py/tests from the baseline commit. The session repo
+    # committed "baseline" BEFORE the writer touched anything, so HEAD is pristine.
+    restored = False
+    try:
+        r = subprocess.run(["git", "checkout", "HEAD", "--", "app.py", "tests/"],
+                           cwd=str(before_dir), capture_output=True, text=True, timeout=10)
+        restored = (r.returncode == 0)
+    except Exception:
+        restored = False
+    # Fallback: if git restore failed (e.g. .git didn't copy), pull the pristine
+    # app.py straight from the source repo that sessions are cloned from.
+    if not restored:
+        from pathlib import Path as _P
+        pristine = _P(__file__).parent.parent / "challenge-repos" / "sample-app" / "app.py"
+        if pristine.exists():
+            shutil.copy2(pristine, before_dir / "app.py")
     port = _free_port()
     proc = _spawn(before_dir, port)
     ready = _wait_ready(port)
