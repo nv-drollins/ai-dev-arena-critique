@@ -603,7 +603,7 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
     # writer↔critic feedback loop — it lets the 70B's review actually improve the
     # result instead of just narrating it. Guardrailed/replay are unaffected.
     REPAIR_TARGET = int(os.environ.get("LIVE_REPAIR_TARGET", "85"))
-    MAX_REPAIRS = int(os.environ.get("LIVE_MAX_REPAIRS", "1"))
+    MAX_REPAIRS = int(os.environ.get("LIVE_MAX_REPAIRS", "2"))
     repair_attempt = 0
     while (mode == "live" and CRITIC_ENABLED
            and score.get("overall", 0) < REPAIR_TARGET
