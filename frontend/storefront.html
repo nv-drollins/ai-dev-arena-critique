@@ -87,24 +87,37 @@ if (STATE) {
 let cart = {};      // product_id -> {name, price, qty}
 let PRODUCTS = [];
 
-async function api(path, opts){ const r = await fetch(API+path, opts); return r.json(); }
+async function api(path, opts){
+  if(!API) throw new Error('No app API set. Open this via the /live view, or add ?api=http://host:port');
+  const r = await fetch(API+path, opts);
+  if(!r.ok) throw new Error('HTTP '+r.status+' from '+API+path);
+  return r.json();
+}
+
+// Normalize whatever /api/products returns into a plain array.
+function asProductArray(d){
+  if(Array.isArray(d)) return d;
+  if(d && Array.isArray(d.products)) return d.products;
+  return [];
+}
 
 async function loadProducts(){
   try{
     const d = await api('/api/products');
-    PRODUCTS = d.products || d || [];
+    PRODUCTS = asProductArray(d);
     const el = document.getElementById('products');
+    if(!PRODUCTS.length){ el.innerHTML = '<div class="empty">No products returned by the app.</div>'; return; }
     el.innerHTML = '';
     PRODUCTS.forEach(p=>{
       const div = document.createElement('div'); div.className='product';
       div.innerHTML = `<div class="name">${p.name}</div><div class="cat">${p.category||''}</div>
-        <div class="row"><span class="price">$${p.price.toFixed(2)}</span>
+        <div class="row"><span class="price">$${(+p.price).toFixed(2)}</span>
         <button data-id="${p.id}">Add</button></div>`;
       div.querySelector('button').onclick = ()=>addToCart(p);
       el.appendChild(div);
     });
   }catch(e){ document.getElementById('products').innerHTML =
-    `<div class="empty">Could not reach the app API.<br>${e}</div>`; }
+    `<div class="empty">Could not reach the app API.<br>${e.message||e}</div>`; }
 }
 
 function addToCart(p){
