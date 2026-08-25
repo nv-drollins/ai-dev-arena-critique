@@ -667,7 +667,8 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
                            capture_output=True, timeout=10)
             await broadcast("edited",
                 f"Repair improved the score: {prev_score.get('overall')} → {new_score.get('overall')}.",
-                diff=new_diff, score=new_score)
+                diff=new_diff, score=new_score,
+                files_changed=[{"file": c["file"], "type": c["type"]} for c in repair_changes])
         else:
             # repair was worse — revert to the first attempt
             subprocess.run(["git", "checkout", "--", "."], cwd=work_dir / "sample-app",
@@ -681,7 +682,8 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
             s["fulfilled_requirements"] = detect_fulfilled_requirements(challenge, test_results)
             await broadcast("edited",
                 f"Repair scored lower ({new_score.get('overall')}) — kept the first attempt ({prev_score.get('overall')}).",
-                score=prev_score)
+                score=prev_score, diff=diff_for_scoring,
+                files_changed=[{"file": c["file"], "type": c["type"]} for c in prev_changes])
             break
 
     # Guardrailed rescue (score-gated): if the writer's own solution scored below
@@ -750,9 +752,13 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
         s["status"] = "completed"
         s["review_elapsed"] = time.time() - review_start
         await broadcast("completed", "Review complete!", score=score, critique=critique,
-                        write_elapsed=elapsed, review_elapsed=s["review_elapsed"])
+                        write_elapsed=elapsed, review_elapsed=s["review_elapsed"],
+                        diff=diff_for_scoring,
+                        files_changed=[{"file": c["file"], "type": c["type"]} for c in changes])
     else:
-        await broadcast("completed", "Demo complete!", score=score)
+        await broadcast("completed", "Demo complete!", score=score,
+                        diff=diff_for_scoring,
+                        files_changed=[{"file": c["file"], "type": c["type"]} for c in changes])
 
     return score
 
