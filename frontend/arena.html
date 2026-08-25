@@ -235,9 +235,12 @@ let sid = null;
 let sess = null;   // session object from /api/session/{id}
 let connectMs = null;
 // Two independent clocks: writing (writer + tests) and reviewing (the 70B critic).
+// Accumulator model so they PAUSE/RESUME across repair rounds — the writer↔review
+// ping-pong (write → review → write repair → review …) sums each side's total.
 let writeTimerId = null, reviewTimerId = null;
-let writeStartMs = null, reviewStartMs = null;
-let writeFrozen = false, reviewFrozen = false;
+let writeAccumMs = 0, reviewAccumMs = 0;      // total elapsed so far (paused segments)
+let writeSinceMs = null, reviewSinceMs = null; // start of the current running segment
+let writeDone = false, reviewDone = false;    // hard-stopped at run completion
 let CRITIC_MAYBE = true;   // set from telemetry: is a reviewing phase expected?
 
 /* ---- helpers ---- */
@@ -275,58 +278,66 @@ function setScore(sc) {
 }
 function fmt(sec){ const e=Math.max(0,Math.floor(sec)); return String(Math.floor(e/60)).padStart(2,'0')+':'+String(e%60).padStart(2,'0'); }
 function paint(id, sec, cls){ const el=document.getElementById(id); if(!el) return; el.textContent=fmt(sec); el.className='timer '+cls; }
+function writeElapsed(){ return (writeAccumMs + (writeSinceMs ? Date.now()-writeSinceMs : 0)) / 1000; }
+function reviewElapsed(){ return (reviewAccumMs + (reviewSinceMs ? Date.now()-reviewSinceMs : 0)) / 1000; }
 
-// Writing clock: runs from connect until the critic phase begins.
+// ── Writing clock ── runs while the writer is working; pauses when review starts,
+// resumes when a repair round hands control back to the writer.
 function startWriteTimer(){
-  if (writeFrozen) return;                 // never restart a frozen clock
-  if (writeTimerId) return;                // already running
-  if (writeStartMs == null) writeStartMs = Date.now();
-  writeTimerId = setInterval(tickWrite, 250); tickWrite();
+  if (writeDone || writeSinceMs != null) return;   // done, or already running
+  writeSinceMs = Date.now();
+  if (!writeTimerId){ writeTimerId = setInterval(tickWrite, 250); }
+  tickWrite();
 }
 function tickWrite(){
-  if (writeFrozen || writeStartMs == null) return;
-  const e=(Date.now()-writeStartMs)/1000;
+  if (writeSinceMs == null) return;
+  const e = writeElapsed();
   paint('timerWrite', e, e>90?'danger':e>45?'warning':'running');
 }
-function stopWriteTimer(seconds){
-  if (writeFrozen && seconds == null) return;   // already frozen; don't clobber with a worse value
+function pauseWriteTimer(totalSeconds){
+  // Fold the current segment into the accumulator. Optional totalSeconds pins the
+  // authoritative total from the backend (write_elapsed).
+  if (writeSinceMs != null){ writeAccumMs += Date.now()-writeSinceMs; writeSinceMs = null; }
+  if (totalSeconds != null) writeAccumMs = totalSeconds*1000;
   if (writeTimerId){ clearInterval(writeTimerId); writeTimerId=null; }
-  // prefer an explicit seconds arg; else the live elapsed; else keep existing display
-  let e;
-  if (seconds != null) e = seconds;
-  else if (writeStartMs) e = (Date.now()-writeStartMs)/1000;
-  else if (writeFrozen) return;                 // frozen with no better value → leave as-is
-  else e = 0;
-  writeFrozen = true;
-  paint('timerWrite', e, 'final');
+  paint('timerWrite', writeAccumMs/1000, 'final');   // 'final' styling while paused
+}
+function stopWriteTimer(totalSeconds){          // hard stop at run completion
+  pauseWriteTimer(totalSeconds); writeDone = true;
 }
 
-// Reviewing clock: starts when the critic phase begins, stops on completion.
+// ── Reviewing clock ── mirror image: runs during review, pauses when it hands
+// back to the writer for a repair, resumes on the next review round.
 function startReviewTimer(){
-  if (reviewTimerId || reviewFrozen) return;
-  reviewStartMs = Date.now();
-  reviewTimerId = setInterval(tickReview, 250); tickReview();
+  if (reviewDone || reviewSinceMs != null) return;
+  reviewSinceMs = Date.now();
+  if (!reviewTimerId){ reviewTimerId = setInterval(tickReview, 250); }
+  tickReview();
 }
 function tickReview(){
-  if (reviewFrozen || reviewStartMs == null) return;
-  const e=(Date.now()-reviewStartMs)/1000;
+  if (reviewSinceMs == null) return;
+  const e = reviewElapsed();
   paint('timerReview', e, e>150?'danger':e>90?'warning':'running');
 }
-function stopReviewTimer(seconds){
+function pauseReviewTimer(totalSeconds){
+  if (reviewSinceMs != null){ reviewAccumMs += Date.now()-reviewSinceMs; reviewSinceMs = null; }
+  if (totalSeconds != null) reviewAccumMs = totalSeconds*1000;
   if (reviewTimerId){ clearInterval(reviewTimerId); reviewTimerId=null; }
-  reviewFrozen = true;
-  const e = (seconds!=null) ? seconds : (reviewStartMs? (Date.now()-reviewStartMs)/1000 : 0);
-  paint('timerReview', e, 'final');
+  paint('timerReview', reviewAccumMs/1000, 'final');
+}
+function stopReviewTimer(totalSeconds){
+  pauseReviewTimer(totalSeconds); reviewDone = true;
 }
 function resetTimers(){
   if (writeTimerId){ clearInterval(writeTimerId); writeTimerId=null; }
   if (reviewTimerId){ clearInterval(reviewTimerId); reviewTimerId=null; }
-  writeStartMs=reviewStartMs=null; writeFrozen=reviewFrozen=false;
+  writeAccumMs=reviewAccumMs=0; writeSinceMs=reviewSinceMs=null; writeDone=reviewDone=false;
   document.getElementById('timerWrite').textContent='--:--';
   document.getElementById('timerWrite').className='timer idle';
   document.getElementById('timerReview').textContent='--:--';
   document.getElementById('timerReview').className='timer idle';
 }
+
 
 /* ---- Cluster gauges (scalable: renders one card per Spark) ---- */
 function gaugeSVG(pct) {
@@ -436,17 +447,23 @@ function onEvent(ev) {
     else if (/FAIL|ERROR/.test(ev.terminal_output)) line.classList.add('fail');
     t.appendChild(line); t.scrollTop = t.scrollHeight;
   }
-  // The critic phase begins → freeze WRITING (at the backend's write_elapsed) and
-  // start the REVIEWING clock. This is THE moment code-writing ends.
+  // ── Clock ping-pong across writer↔review rounds ──
+  // Writer is working (initial code, tests, OR a repair round) → run WRITE, pause REVIEW.
+  // Reviewer is working (critique / repair-feedback) → pause WRITE, run REVIEW.
+  // These pause/resume, so the repair loop's write→review→write→review sums correctly.
+  if (ev.phase === 'calling_llm' || ev.phase === 'editing' || ev.phase === 'testing') {
+    pauseReviewTimer();
+    startWriteTimer();
+  }
   if (ev.phase === 'critiquing') {
-    stopWriteTimer(ev.write_elapsed);
+    pauseWriteTimer();   // fold the writer's just-finished segment (accumulator is source of truth mid-run)
     startReviewTimer();
   }
   if (ev.score) setScore(ev.score);
-  // live reviewer stream (heartbeat preview while the 70B thinks)
+  // live reviewer stream (heartbeat preview while the 70B thinks) → reviewer is active
   if (ev.critique_stream !== undefined) {
-    stopWriteTimer();     // ensure writing is frozen once review tokens flow
-    startReviewTimer();   // ensure it's running
+    pauseWriteTimer();
+    startReviewTimer();
     document.getElementById('critiqueArea').style.display = 'block';
     const st = document.getElementById('critiqueStream');
     st.style.display = 'block';
@@ -456,9 +473,11 @@ function onEvent(ev) {
   // final structured critique → review is done
   if (ev.critique) renderCritique(ev.critique);
   if (ev.phase === 'completed') {
-    // Freeze both at the backend's authoritative split (falls back to live values).
-    stopWriteTimer(ev.write_elapsed);
-    stopReviewTimer(ev.review_elapsed);
+    // Hard-stop both. Use the JS accumulator (sums all repair rounds) — the
+    // backend's write_elapsed/review_elapsed are single-round values and would
+    // undercount a multi-round repair, so we don't pin them here.
+    stopWriteTimer();
+    stopReviewTimer();
   }
   if (ev.phase === 'error') { stopWriteTimer(); stopReviewTimer(); }
 }
@@ -557,7 +576,7 @@ function onSessionReady(s) {
     // back-date the review clock to the real review start if we can
     if (s.completed_at && s.write_elapsed != null && s.started_at) {
       const reviewStartedMs = (s.started_at + s.write_elapsed) * 1000;
-      if (reviewStartedMs && reviewStartedMs < Date.now()) reviewStartMs = reviewStartedMs;
+      if (reviewStartedMs && reviewStartedMs < Date.now()) reviewSinceMs = reviewStartedMs;
     }
   } else {
     startWriteTimer();
