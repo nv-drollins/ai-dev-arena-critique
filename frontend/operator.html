@@ -264,8 +264,9 @@ h1 .logo { color: var(--accent); }
   <div class="card">
     <h2>Demo Mode</h2>
     <div class="mode-selector">
+      <button class="mode-btn active" data-mode="agentic" onclick="selectMode(this)">🤖 Agentic</button>
       <button class="mode-btn" data-mode="live" onclick="selectMode(this)">Fully Live</button>
-      <button class="mode-btn active" data-mode="guardrailed" onclick="selectMode(this)">Guardrailed</button>
+      <button class="mode-btn" data-mode="guardrailed" onclick="selectMode(this)">Guardrailed</button>
       <button class="mode-btn" data-mode="replay" onclick="selectMode(this)">Replay</button>
     </div>
 
@@ -320,7 +321,7 @@ h1 .logo { color: var(--accent); }
 const API = '/api';
 let selectedChallenge = null;
 let currentSession = null;
-let selectedMode = 'guardrailed';
+let selectedMode = 'agentic';
 let selectedAudience = 'broad';
 
 async function loadChallenges() {

@@ -327,6 +327,14 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
         await broadcast("edited", "Solution applied (replay).", diff=diff_output, files_changed=changes_info)
         s["human_overrides"] = 0  # scripted run, no interventions
         response = None           # skip the LLM patch block below
+    elif mode == "agentic":
+        # AGENTIC mode — Hermes drives local Nemotron as an autonomous agent:
+        # reads the repo, edits app.py, runs pytest, iterates. It edits files on
+        # disk directly, so we set response=None (no patch-application step) and
+        # feed the git-detected changes into the same validation/scoring path.
+        changes = await run_agentic(work_dir, challenge, broadcast)
+        s["human_overrides"] = 0
+        response = None
     else:
         # LIVE / GUARRAILED — call the LLM (guarded by this else-branch)
         # Phase 3: Call the LLM — send live heartbeat events
@@ -761,6 +769,97 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
                         files_changed=[{"file": c["file"], "type": c["type"]} for c in changes])
 
     return score
+
+
+async def run_agentic(work_dir: Path, challenge: dict, broadcast) -> list:
+    """AGENTIC mode: drive Hermes as an autonomous coding agent on local Nemotron.
+
+    Instead of a one-shot patch call, Hermes reads the repo, edits files, runs
+    pytest, reads tracebacks and iterates — all with real tools. We spawn it as a
+    subprocess in the session's sample-app dir, stream its tool-call activity to
+    the Arena/Theater via broadcast(), and return the list of changed files.
+    Downstream validation/scoring is identical to the other modes.
+    """
+    repo = work_dir / "sample-app"
+    from shlex import quote as shlex_quote
+    hermes_bin = os.environ.get(
+        "HERMES_BIN",
+        os.path.expanduser("~/.hermes/hermes-agent/venv/bin/python") + " -m hermes_cli.main")
+    profile = os.environ.get("HERMES_PROFILE_AGENTIC", "nemo")
+
+    # Build a focused task prompt from the challenge (its own description + test cmd).
+    test_cmd = ""
+    for t in (challenge.get("validation", {}).get("tests", []) or []):
+        test_cmd = t.replace("{{repo_path}}", str(repo))
+        break
+    task = (
+        f"You are in a Flask app at {repo}. Task: {challenge.get('title','')} — "
+        f"{challenge.get('description','')}. "
+        f"Steps: (1) read app.py to understand the code, (2) fix the issue in app.py, "
+        f"(3) run the tests: {test_cmd}  (4) if any fail, read the error, fix, and re-run "
+        f"until they pass. Do NOT edit files under tests/. Report the final pytest result."
+    )
+
+    cmd = f'cd {shlex_quote(str(repo))} && {hermes_bin} chat -p {shlex_quote(profile)} --yolo -Q -q {shlex_quote(task)}'
+
+    await broadcast("calling_llm", "🤖 Agentic Hermes (local Nemotron) is taking over — reading the repo…")
+
+    proc = await asyncio.create_subprocess_shell(
+        cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        cwd=str(repo),
+    )
+
+    # Stream Hermes stdout, translating tool activity into Arena/Theater events.
+    tool_count = 0
+    import re as _re
+    # Hermes CLI prints tool runs as lines containing "$ <cmd>" or a tool glyph;
+    # we surface anything that looks like an action so the audience sees the agent work.
+    async def pump():
+        nonlocal tool_count
+        try:
+            while True:
+                raw = await proc.stdout.readline()
+                if not raw:
+                    break
+                line = raw.decode("utf-8", "replace").rstrip()
+                # strip ANSI
+                line = _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line).strip("\r ")
+                if not line:
+                    continue
+                low = line.lower()
+                # Tool/command activity → editing phase heartbeat
+                if ("$" in line and ("pytest" in low or "app.py" in low or "python" in low)) \
+                   or low.startswith(("read", "edit", "patch", "write", "search", "wrote", "applied")) \
+                   or "💻" in raw.decode("utf-8", "replace") or "🔧" in raw.decode("utf-8", "replace"):
+                    tool_count += 1
+                    await broadcast("editing", f"🤖 {line[:180]}")
+                elif "reasoning" in low or "thinking" in low:
+                    await broadcast("calling_llm", f"🧠 {line[:160]}")
+        except Exception:
+            pass
+
+    pump_task = asyncio.create_task(pump())
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=int(os.environ.get("AGENTIC_TIMEOUT", "540")))
+    except asyncio.TimeoutError:
+        proc.kill()
+        await broadcast("warning", "Agentic run hit the time limit — scoring whatever it produced.")
+    finally:
+        pump_task.cancel()
+        try:
+            await pump_task
+        except asyncio.CancelledError:
+            pass
+
+    # Determine changed files from git (the agent edited them directly on disk).
+    diff_stat = subprocess.run(
+        ["git", "diff", "--name-only"], cwd=repo, capture_output=True, text=True, timeout=10).stdout
+    changes = [{"file": f.strip(), "type": "modified"} for f in diff_stat.splitlines() if f.strip()]
+    await broadcast("edited", f"🤖 Agent finished after {tool_count} tool actions.",
+                    files_changed=changes)
+    return changes
 
 
 async def call_llm(prompt_task: str, file_list: str, app_code: str, test_code: str,
