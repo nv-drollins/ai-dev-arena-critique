@@ -800,7 +800,7 @@ async def run_agentic(work_dir: Path, challenge: dict, broadcast) -> list:
         f"until they pass. Do NOT edit files under tests/. Report the final pytest result."
     )
 
-    cmd = f'cd {shlex_quote(str(repo))} && {hermes_bin} chat -p {shlex_quote(profile)} --yolo -Q -q {shlex_quote(task)}'
+    cmd = f'cd {shlex_quote(str(repo))} && {hermes_bin} chat -p {shlex_quote(profile)} --yolo -q {shlex_quote(task)}'
 
     await broadcast("calling_llm", "🤖 Agentic Hermes (local Nemotron) is taking over — reading the repo…")
 
@@ -818,28 +818,44 @@ async def run_agentic(work_dir: Path, challenge: dict, broadcast) -> list:
     seen_recent = []   # dedupe identical consecutive steps
 
     def _classify(text: str):
-        """Map a Hermes CLI line to a clean (emoji, label) step, or None to skip."""
+        """Map a Hermes CLI line to a clean (emoji, label) step, or None to skip.
+        Hermes (non-quiet) prints tool activity as:
+          ┊ 📖 preparing read_file…      (file tools: 'preparing <tool_name>')
+          ┊ 💻 $   <shell command>  0.3s  (terminal tool)
+        """
         t = _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text).strip("\r ").strip()
         low = t.lower()
         if not t:
             return None
-        # A terminal command line (Hermes prints "💻 $ <cmd>")
-        if "💻" in text or _re.search(r"(^|\s)\$\s", t):
-            cmd = _re.sub(r"^.*?\$\s*", "", t)[:140]
-            if "pytest" in low:
-                return ("🧪", f"Running tests: {cmd}")
-            if "python" in low and "app.py" in low:
-                return ("▶️", f"Running the app: {cmd}")
-            if cmd:
-                return ("💻", f"Shell: {cmd}")
+        # Terminal command: "💻 $ <cmd>". Skip the "preparing terminal…" placeholder
+        # (the real "$ <cmd>" line follows separately).
+        if "preparing terminal" in low:
             return None
-        # File-tool activity by verb
-        if _re.match(r"^(read|reading)\b", low) or "read_file" in low:
-            return ("📖", "Reading " + (_re.sub(r"^\S+\s*", "", t)[:80] or "a file"))
-        if _re.match(r"^(edit|editing|patch|patching|wrote|writing|write|applied|apply)\b", low) or "patch" in low and "app.py" in low:
-            return ("✏️", "Editing app.py")
-        if _re.match(r"^(search|searching|grep)\b", low) or "search_files" in low:
-            return ("🔎", "Searching the codebase")
+        if "💻" in text or _re.search(r"\$\s{2,}\S", t):
+            if "$" not in t:
+                return None
+            cmd = _re.sub(r"^.*?\$\s+", "", t)
+            cmd = _re.sub(r"\s+[\d.]+s(\s+\[exit \d+\])?\s*$", "", cmd).strip()[:120]
+            if not cmd:
+                return None
+            if "pytest" in low:
+                return ("🧪", "Running the test suite")
+            if "app.py" in low and "python" in low:
+                return ("▶️", "Running the app to check the fix")
+            if cmd.startswith(("ls", "cat", "find", "grep", "head", "tail")):
+                return ("📂", f"Exploring: {cmd}")
+            return ("💻", f"Shell: {cmd}")
+        # File tools: "preparing <tool_name>"
+        mprep = _re.search(r"preparing\s+([a-z_]+)", low)
+        if mprep:
+            tool = mprep.group(1)
+            return {
+                "read_file": ("📖", "Reading the source code"),
+                "edit_file": ("✏️", "Editing app.py"),
+                "patch":     ("✏️", "Applying a fix to app.py"),
+                "write_file":("✏️", "Writing changes to app.py"),
+                "search_files": ("🔎", "Searching the codebase"),
+            }.get(tool, ("🔧", f"Using {tool}"))
         return None
 
     async def pump():
