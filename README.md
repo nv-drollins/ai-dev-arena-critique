@@ -70,7 +70,10 @@ One-time bring-up, run **in parallel** on the two boxes (they wait for each othe
 ```bash
 git clone https://github.com/nv-drollins/ai-dev-arena-critique.git ai-dev-arena
 cd ai-dev-arena
-cp bin/arena.conf bin/arena.conf.local   # edit node IPs/ports for your cluster
+# Optional: override node IPs/ports without editing the tracked file. Create a
+# SMALL snippet (NOT a copy of arena.conf) — only the vars you're changing:
+#   printf 'HEAD_NODE_IP="192.168.1.159"\nWRITER_HOST_SPARK="192.168.1.149"\n' > bin/arena.conf.local
+# It's gitignored and sourced last (arena.conf.local > env > defaults).
 
 # on the HEAD Spark:
 bash bin/install-head.sh      # prereqs, vLLM image, venv + deps, Hermes + nemo
