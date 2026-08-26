@@ -6,6 +6,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/../"
 
+# --- preflight: fail early with a clear "install/fix X first" message ----------
+die() { printf '\033[1;31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
+[ -d .venv ] || die ".venv not found — run bin/install-head.sh first (it creates the venv + installs deps)."
+[ -x .venv/bin/uvicorn ] || die "uvicorn missing from .venv — run: .venv/bin/pip install -r requirements.txt"
+[ -f orchestrator/main.py ] || die "orchestrator/main.py not found — are you in the ai-dev-arena repo root?"
+command -v ss   >/dev/null 2>&1 || die "'ss' not found (iproute2) — needed to check the port. Install iproute2."
+command -v curl >/dev/null 2>&1 || die "'curl' not found — needed for the health check."
+
 fuser -k 8080/tcp >/dev/null 2>&1 || true
 pkill -9 -f "uvicorn orchestrator.main:app" >/dev/null 2>&1 || true
 sleep 2

@@ -46,6 +46,17 @@ need curl
 [ -d /proc/driver/nvidia ] || { err "no NVIDIA driver visible under /proc/driver/nvidia"; exit 3; }
 ok "prereqs present: python3/docker/tmux/git/curl + NVIDIA driver"
 
+# Hermes Agent is required for the AGENTIC demo mode (it drives the writer as an
+# agent). Not needed for replay, and you may install it after the Arena — so this
+# is an advisory, not a hard stop.
+if command -v hermes >/dev/null 2>&1; then
+  ok "Hermes Agent found — agentic mode available (remember to create the 'nemo' profile)"
+else
+  warn "Hermes Agent not found — AGENTIC mode needs it. Install it before running agentic:"
+  warn "    curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+  warn "  (Replay mode works without Hermes.)"
+fi
+
 step "1. docker: pull vLLM image (if not already cached)"
 if docker image inspect "$VLLM_IMAGE" >/dev/null 2>&1; then
   ok "image $VLLM_IMAGE is already present"
