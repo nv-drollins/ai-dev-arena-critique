@@ -798,6 +798,12 @@ async def run_agentic(work_dir: Path, challenge: dict, broadcast) -> list:
     for t in (challenge.get("validation", {}).get("tests", []) or []):
         test_cmd = t.replace("{{repo_path}}", str(repo))
         break
+    # Optional per-challenge hint (challenge JSON: "agent_hint"). Used to point the
+    # agent straight at the fix on harder tasks (e.g. C's O(n^2) perf problem) so it
+    # doesn't burn time discovering the problem class. Keeps the fix authentic — it
+    # still writes + verifies the change — just skips the exploration.
+    hint = (challenge.get("agent_hint") or "").strip()
+    hint_line = f"\nHint: {hint}\n" if hint else ""
     task = (
         f"You are in a Flask app at {repo}. Fix this issue in app.py: "
         f"{challenge.get('title','')} — {challenge.get('description','')}. "
@@ -806,6 +812,7 @@ async def run_agentic(work_dir: Path, challenge: dict, broadcast) -> list:
         f"2. Make the SMALLEST change to app.py that fixes it (one focused edit).\n"
         f"3. Run the tests ONCE to confirm: {test_cmd}\n"
         f"4. Only if a test fails, make ONE more targeted fix and re-run; otherwise STOP.\n"
+        f"{hint_line}"
         f"Do NOT edit files under tests/. Do NOT write extra scripts or explore beyond app.py. "
         f"Do NOT re-read files you've already seen. Stop as soon as the tests pass."
     )
