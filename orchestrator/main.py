@@ -759,6 +759,10 @@ async def run_agent(session_id: str, challenge: dict, work_dir: Path):
         s["critique"] = critique
         s["status"] = "completed"
         s["review_elapsed"] = time.time() - review_start
+        # Re-score now that the reviewer's verdict is in: code_quality + efficiency
+        # switch from diff-size proxies to the 70B's actual quality judgment.
+        score = score_session(s)
+        s["score"] = score
         await broadcast("completed", "Review complete!", score=score, critique=critique,
                         write_elapsed=elapsed, review_elapsed=s["review_elapsed"],
                         diff=diff_for_scoring,

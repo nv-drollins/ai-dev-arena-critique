@@ -104,11 +104,23 @@ def score_session(session: dict) -> dict:
     breakdown["test_pass_rate"] = {"score": test_score, "max": weights["test_pass_rate"], "detail": detail}
 
     # 3. Code quality / review (20 pts)
-    # Proxy: number of changes × structure of changes
+    # If the 70B reviewer has run, its verdict drives this score (a real quality
+    # judgment). Otherwise fall back to the diff-size proxy. Verdict bands keep it
+    # stable + explainable rather than asking the model for a raw number.
     changes = session.get("changes", [])
-    if changes:
-        # Fewer focused changes = higher quality (up to a point)
-        # Penalize massive diffs
+    critique = session.get("critique") or {}
+    verdict = (critique.get("verdict") or "").lower().strip()
+    _QUALITY_BAND = {          # fraction of the 20-pt bucket
+        "ship": 1.0, "approve": 1.0, "lgtm": 1.0,
+        "ship-with-nits": 0.85, "approve-with-nits": 0.85, "minor": 0.85,
+        "needs-work": 0.5, "request-changes": 0.5, "changes-requested": 0.5,
+        "reject": 0.2, "block": 0.2,
+    }
+    if verdict in _QUALITY_BAND and changes:
+        quality_score = round(_QUALITY_BAND[verdict] * weights["code_quality"])
+        quality_detail = f"reviewer: {verdict}"
+    elif changes:
+        # Fallback proxy: fewer focused changes = higher quality; penalize massive diffs
         diff_size = session.get("diff_size", 0)
         if diff_size < 5000:
             quality_score = weights["code_quality"]
@@ -116,13 +128,14 @@ def score_session(session: dict) -> dict:
             quality_score = int(weights["code_quality"] * 0.7)
         else:
             quality_score = int(weights["code_quality"] * 0.4)
-        # Bonus if test files were added/modified
         test_files = [c for c in changes if "test" in c["file"].lower()]
         if test_files:
             quality_score = min(quality_score + 5, weights["code_quality"])
+        quality_detail = f"{len(changes)} files changed"
     else:
         quality_score = 0
-    breakdown["code_quality"] = {"score": quality_score, "max": weights["code_quality"], "detail": f"{len(changes)} files changed"}
+        quality_detail = "no changes"
+    breakdown["code_quality"] = {"score": quality_score, "max": weights["code_quality"], "detail": quality_detail}
 
     # 4. Requirement completeness (20 pts)
     requirements = session.get("fulfilled_requirements", [])
@@ -137,22 +150,26 @@ def score_session(session: dict) -> dict:
     }
 
     # 5. Efficiency / resource usage (10 pts)
-    # Lower diff_size relative to what was needed = more efficient.
-    # A session that shipped no changes gets nothing here (efficiency has no
-    # meaning without a change) — prevents "empty run = max efficiency".
+    # When the reviewer has judged the code, efficiency tracks the same verdict
+    # (a clean, no-waste solution is what "efficient" means here) — so the agent
+    # isn't punished for a thorough-but-larger diff. Falls back to the diff-size
+    # heuristic pre-review. No changes shipped → 0 (empty run isn't "efficient").
     diff_size = session.get("diff_size", 0)
-    if not session.get("changes"):
+    if not changes:
         eff_score = 0
+        eff_detail = "no changes"
+    elif verdict in _QUALITY_BAND:
+        eff_score = round(_QUALITY_BAND[verdict] * weights.get("efficiency", 10))
+        eff_detail = f"reviewer: {verdict}"
     elif diff_size < 3000:
-        eff_score = 10
+        eff_score = 10; eff_detail = f"{diff_size} chars changed"
     elif diff_size < 8000:
-        eff_score = 7
+        eff_score = 7; eff_detail = f"{diff_size} chars changed"
     elif diff_size < 15000:
-        eff_score = 4
+        eff_score = 4; eff_detail = f"{diff_size} chars changed"
     else:
-        eff_score = 2
-    breakdown["efficiency"] = {"score": eff_score, "max": weights.get("efficiency", 10),
-                               "detail": f"{diff_size} chars changed" + (" (no changes)" if not session.get("changes") else "")}
+        eff_score = 2; eff_detail = f"{diff_size} chars changed"
+    breakdown["efficiency"] = {"score": eff_score, "max": weights.get("efficiency", 10), "detail": eff_detail}
 
     # 6. Human overrides (5 pts)
     overrides = session.get("human_overrides", 0)
