@@ -66,8 +66,16 @@ need_pkg tmux tmux
 need_pkg git  git
 need_pkg curl curl
 
-# Docker daemon actually reachable?
-docker info >/dev/null 2>&1 || { err "Docker is installed but the daemon isn't reachable — start it: sudo systemctl start docker"; exit 3; }
+# Docker daemon reachable? (a fresh user may hit a socket-permission error rather
+# than a real "daemon down" — 0b below fixes the permission side, so only hard-fail
+# if the daemon is unreachable even via sudo.)
+if ! docker info >/dev/null 2>&1; then
+  if sudo docker info >/dev/null 2>&1; then
+    warn "docker works via sudo but not as $USER — 0b will add you to the docker group."
+  else
+    err "Docker is installed but the daemon isn't reachable — start it: sudo systemctl start docker"; exit 3
+  fi
+fi
 # NVIDIA driver (kernel-level — never auto-install; a bad driver install can brick a box)
 [ -d /proc/driver/nvidia ] || { err "NVIDIA driver not visible under /proc/driver/nvidia — install the DGX/GB10 driver first (this is not auto-installed)."; exit 3; }
 # nvidia-container-toolkit — needed for 'docker run --gpus all'
@@ -76,6 +84,37 @@ if ! command -v nvidia-ctk >/dev/null 2>&1 && ! docker info 2>/dev/null | grep -
   warn "  install: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html"
 fi
 ok "prereqs present: python3/docker(+daemon)/tmux/git/curl + NVIDIA driver"
+
+# --- 0b. wire Docker for this user + the NVIDIA container runtime ------------
+# The DGX Spark base image ships Docker + driver + container-toolkit, but a fresh
+# user often still needs: (1) membership in the 'docker' group (else every docker
+# call needs sudo / hits a socket-permission error), and (2) the nvidia runtime
+# registered with Docker (else 'docker run --gpus all' fails). Both are idempotent.
+if ! id -nG "$USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+  step "0b. add $USER to the 'docker' group"
+  sudo usermod -aG docker "$USER" && ok "added $USER to docker group" \
+    || warn "could not add to docker group — run: sudo usermod -aG docker $USER"
+  NEWGRP_NEEDED=1
+else
+  ok "$USER already in the docker group"
+fi
+# register the NVIDIA runtime with Docker if it isn't already
+if ! docker info 2>/dev/null | grep -qi 'Runtimes:.*nvidia' && command -v nvidia-ctk >/dev/null 2>&1; then
+  step "0b. configure the NVIDIA container runtime for Docker"
+  sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker \
+    && ok "nvidia runtime configured + docker restarted" \
+    || warn "could not configure nvidia runtime — run: sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker"
+else
+  ok "nvidia container runtime already registered with Docker"
+fi
+# If we just added the group, this shell isn't in it yet. Re-exec under the new
+# group so the docker commands below work without a manual re-login.
+if [ "${NEWGRP_NEEDED:-0}" = 1 ] && ! groups 2>/dev/null | grep -qw docker; then
+  if [ -z "${_ARENA_REEXEC:-}" ]; then
+    warn "re-running under the new 'docker' group (so docker works without re-login)…"
+    exec sg docker "_ARENA_REEXEC=1 bash '$0' $*"
+  fi
+fi
 
 # head must reach the worker over key-based SSH (Ray + deploy rely on it). This
 # was previously assumed-but-unchecked and failed cryptically at "wait for worker".

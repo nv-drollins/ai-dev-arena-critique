@@ -49,9 +49,23 @@ need_system python3 "install Python 3.11+ (sudo apt-get install -y python3)"
 need_system docker  "install Docker (https://docs.docker.com/engine/install/ubuntu/)"
 need_pkg tmux tmux
 need_pkg curl curl
-docker info >/dev/null 2>&1 || { err "Docker daemon not reachable — start it: sudo systemctl start docker"; exit 3; }
+docker info >/dev/null 2>&1 || { if sudo docker info >/dev/null 2>&1; then warn "docker works via sudo but not as $USER — 0b will fix the group."; else err "Docker daemon not reachable — start it: sudo systemctl start docker"; exit 3; fi; }
 [ -d /proc/driver/nvidia ] || { err "NVIDIA driver not visible under /proc/driver/nvidia — install it first (not auto-installed)."; exit 3; }
 ok "prereqs present: python3/docker(+daemon)/tmux/curl + NVIDIA driver"
+
+# --- 0b. wire Docker for this user + the NVIDIA container runtime (idempotent) ---
+if ! id -nG "$USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+  sudo usermod -aG docker "$USER" && ok "added $USER to docker group" || warn "run: sudo usermod -aG docker $USER"
+  NEWGRP_NEEDED=1
+else ok "$USER already in docker group"; fi
+if ! docker info 2>/dev/null | grep -qi 'Runtimes:.*nvidia' && command -v nvidia-ctk >/dev/null 2>&1; then
+  sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker \
+    && ok "nvidia runtime configured + docker restarted" \
+    || warn "run: sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker"
+else ok "nvidia runtime already registered with Docker"; fi
+if [ "${NEWGRP_NEEDED:-0}" = 1 ] && ! groups 2>/dev/null | grep -qw docker && [ -z "${_ARENA_REEXEC:-}" ]; then
+  warn "re-running under the new 'docker' group…"; exec sg docker "_ARENA_REEXEC=1 bash '$0' $*"
+fi
 
 step() { printf '\n\033[1;36m==>\033[0m %s\n' "$1"; }
 

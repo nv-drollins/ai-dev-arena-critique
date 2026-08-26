@@ -86,6 +86,11 @@ bash bin/install-worker.sh    # prereqs, Ray worker joins the head
 > auto-installed** (they touch system daemons / kernel modules) — the script tells
 > you exactly what to install if any are missing. The head installer also checks it
 > can reach the worker over key-based SSH and prints the `ssh-copy-id` fix if not.
+>
+> **DGX Spark base image?** It already ships Docker + driver + container toolkit, so
+> the installers just *wire them up* for you (idempotently): add your user to the
+> `docker` group and register the NVIDIA runtime with Docker
+> (`nvidia-ctk runtime configure`). Already set up? They detect it and skip.
 
 Then start the writer vLLM (with tool-calling + MTP + prefix caching) **on the
 worker**:
