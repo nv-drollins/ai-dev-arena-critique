@@ -811,11 +811,37 @@ async def run_agentic(work_dir: Path, challenge: dict, broadcast) -> list:
         cwd=str(repo),
     )
 
-    # Stream Hermes stdout, translating tool activity into Arena/Theater events.
+    # Stream Hermes stdout, translating tool activity into clean, labeled Arena/
+    # Theater steps (📖 Read / ✏️ Edit / 🧪 Test / 🔎 Search) instead of raw CLI noise.
     tool_count = 0
     import re as _re
-    # Hermes CLI prints tool runs as lines containing "$ <cmd>" or a tool glyph;
-    # we surface anything that looks like an action so the audience sees the agent work.
+    seen_recent = []   # dedupe identical consecutive steps
+
+    def _classify(text: str):
+        """Map a Hermes CLI line to a clean (emoji, label) step, or None to skip."""
+        t = _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text).strip("\r ").strip()
+        low = t.lower()
+        if not t:
+            return None
+        # A terminal command line (Hermes prints "💻 $ <cmd>")
+        if "💻" in text or _re.search(r"(^|\s)\$\s", t):
+            cmd = _re.sub(r"^.*?\$\s*", "", t)[:140]
+            if "pytest" in low:
+                return ("🧪", f"Running tests: {cmd}")
+            if "python" in low and "app.py" in low:
+                return ("▶️", f"Running the app: {cmd}")
+            if cmd:
+                return ("💻", f"Shell: {cmd}")
+            return None
+        # File-tool activity by verb
+        if _re.match(r"^(read|reading)\b", low) or "read_file" in low:
+            return ("📖", "Reading " + (_re.sub(r"^\S+\s*", "", t)[:80] or "a file"))
+        if _re.match(r"^(edit|editing|patch|patching|wrote|writing|write|applied|apply)\b", low) or "patch" in low and "app.py" in low:
+            return ("✏️", "Editing app.py")
+        if _re.match(r"^(search|searching|grep)\b", low) or "search_files" in low:
+            return ("🔎", "Searching the codebase")
+        return None
+
     async def pump():
         nonlocal tool_count
         try:
@@ -823,20 +849,22 @@ async def run_agentic(work_dir: Path, challenge: dict, broadcast) -> list:
                 raw = await proc.stdout.readline()
                 if not raw:
                     break
-                line = raw.decode("utf-8", "replace").rstrip()
-                # strip ANSI
-                line = _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line).strip("\r ")
-                if not line:
-                    continue
-                low = line.lower()
-                # Tool/command activity → editing phase heartbeat
-                if ("$" in line and ("pytest" in low or "app.py" in low or "python" in low)) \
-                   or low.startswith(("read", "edit", "patch", "write", "search", "wrote", "applied")) \
-                   or "💻" in raw.decode("utf-8", "replace") or "🔧" in raw.decode("utf-8", "replace"):
+                text = raw.decode("utf-8", "replace")
+                step = _classify(text)
+                if step:
+                    emoji, label = step
+                    # collapse duplicate consecutive steps (Hermes echoes previews)
+                    if seen_recent and seen_recent[-1] == label:
+                        continue
+                    seen_recent.append(label)
+                    if len(seen_recent) > 3:
+                        seen_recent.pop(0)
                     tool_count += 1
-                    await broadcast("editing", f"🤖 {line[:180]}")
-                elif "reasoning" in low or "thinking" in low:
-                    await broadcast("calling_llm", f"🧠 {line[:160]}")
+                    await broadcast("editing", f"{emoji} {label}")
+                else:
+                    low = _re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text).lower()
+                    if "reasoning" in low or "thinking" in low:
+                        await broadcast("calling_llm", "🧠 Agent is reasoning about the fix…")
         except Exception:
             pass
 
