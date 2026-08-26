@@ -37,14 +37,59 @@ cd "$(dirname "$0")/.."                       # repo root
 step() { printf '\n\033[1;36m==>\033[0m %s\n' "$1"; }
 ok "installing on the HEAD Spark (role: ${SPARK_ROLE})"
 
-need() { command -v "$1" >/dev/null 2>&1 || { err "required binary '$1' not found on PATH"; exit 3; }; }
-need python3
-need docker
-need tmux
-need git
-need curl
-[ -d /proc/driver/nvidia ] || { err "no NVIDIA driver visible under /proc/driver/nvidia"; exit 3; }
-ok "prereqs present: python3/docker/tmux/git/curl + NVIDIA driver"
+# Pass --install-deps to auto-apt-install the small userland tools (tmux/git/curl).
+# We deliberately do NOT auto-install Docker, the NVIDIA driver, or the container
+# toolkit — those touch system daemons / kernel modules (and can need a reboot),
+# so we detect + guide instead of silently reconfiguring the box.
+INSTALL_DEPS=0
+[ "${1:-}" = "--install-deps" ] && INSTALL_DEPS=1
+
+# apt-installable userland tools
+need_pkg() {  # need_pkg <binary> <apt-package>
+  command -v "$1" >/dev/null 2>&1 && return 0
+  if [ "$INSTALL_DEPS" = 1 ] && command -v apt-get >/dev/null 2>&1; then
+    warn "'$1' missing — installing '$2' (apt)…"
+    sudo apt-get update -qq && sudo apt-get install -y -qq "$2" \
+      && command -v "$1" >/dev/null 2>&1 && { ok "installed $2"; return 0; }
+  fi
+  err "required '$1' not found. Install it:  sudo apt-get install -y $2   (or re-run with --install-deps)"
+  exit 3
+}
+# system-level prereqs we only DETECT (never auto-install)
+need_system() {  # need_system <binary> <how-to-install message>
+  command -v "$1" >/dev/null 2>&1 || { err "required '$1' not found — $2"; exit 3; }
+}
+
+need_system python3 "install Python 3.11+ (sudo apt-get install -y python3 python3-venv)"
+need_system docker  "install Docker + set it running (see https://docs.docker.com/engine/install/ubuntu/)"
+need_pkg tmux tmux
+need_pkg git  git
+need_pkg curl curl
+
+# Docker daemon actually reachable?
+docker info >/dev/null 2>&1 || { err "Docker is installed but the daemon isn't reachable — start it: sudo systemctl start docker"; exit 3; }
+# NVIDIA driver (kernel-level — never auto-install; a bad driver install can brick a box)
+[ -d /proc/driver/nvidia ] || { err "NVIDIA driver not visible under /proc/driver/nvidia — install the DGX/GB10 driver first (this is not auto-installed)."; exit 3; }
+# nvidia-container-toolkit — needed for 'docker run --gpus all'
+if ! command -v nvidia-ctk >/dev/null 2>&1 && ! docker info 2>/dev/null | grep -qi nvidia; then
+  warn "nvidia-container-toolkit not detected — 'docker run --gpus all' may fail."
+  warn "  install: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html"
+fi
+ok "prereqs present: python3/docker(+daemon)/tmux/git/curl + NVIDIA driver"
+
+# head must reach the worker over key-based SSH (Ray + deploy rely on it). This
+# was previously assumed-but-unchecked and failed cryptically at "wait for worker".
+worker_ssh="${SPARK_WORKERS##*=}"   # SPARK_WORKERS="name=nvidia@ip" -> nvidia@ip
+if [ -n "$worker_ssh" ] && [ "$worker_ssh" != "$SPARK_WORKERS" ]; then
+  if timeout 8 ssh -o BatchMode=yes -o ConnectTimeout=5 "$worker_ssh" 'echo ok' >/dev/null 2>&1; then
+    ok "worker reachable over key-based SSH ($worker_ssh)"
+  else
+    warn "cannot SSH to the worker ($worker_ssh) key-based — set it up so the cluster can form:"
+    warn "    ssh-keygen -t ed25519   # if you don't have a key"
+    warn "    ssh-copy-id $worker_ssh"
+    warn "  (continuing — head install works standalone, but the worker won't join until this is fixed)"
+  fi
+fi
 
 # Hermes Agent drives the writer as an autonomous agent (agentic mode). We install
 # it and set up the profile automatically further down (step 3b) once the writer's

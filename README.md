@@ -80,6 +80,13 @@ bash bin/install-head.sh      # prereqs, vLLM image, venv + deps, Hermes + nemo
 bash bin/install-worker.sh    # prereqs, Ray worker joins the head
 ```
 
+> **Missing small tools?** Pass `--install-deps` to either installer to auto-`apt`
+> the userland bits (`tmux`/`git`/`curl`): `bash bin/install-head.sh --install-deps`.
+> Docker, the NVIDIA driver, and the container toolkit are **detected, not
+> auto-installed** (they touch system daemons / kernel modules) — the script tells
+> you exactly what to install if any are missing. The head installer also checks it
+> can reach the worker over key-based SSH and prints the `ssh-copy-id` fix if not.
+
 Then start the writer vLLM (with tool-calling + MTP + prefix caching) **on the
 worker**:
 

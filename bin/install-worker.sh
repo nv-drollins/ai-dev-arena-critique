@@ -30,13 +30,28 @@ export SPARK_ROLE="${SPARK_ROLE:-worker}"
 
 ok "installing on a WORKER Spark (role: ${SPARK_ROLE:-worker})"
 
-need() { command -v "$1" >/dev/null 2>&1 || { err "required binary '$1' not found"; exit 3; }; }
-need python3
-need docker
-need tmux
-need curl
-[ -d /proc/driver/nvidia ] || { err "no NVIDIA driver /proc/driver/nvidia"; exit 3; }
-ok "prereqs present"
+# Pass --install-deps to auto-apt-install the small userland tools (tmux/curl/git).
+# Docker + the NVIDIA driver are detected, never auto-installed (system daemon /
+# kernel-level — install those yourself first).
+INSTALL_DEPS=0
+[ "${1:-}" = "--install-deps" ] && INSTALL_DEPS=1
+need_pkg() {
+  command -v "$1" >/dev/null 2>&1 && return 0
+  if [ "$INSTALL_DEPS" = 1 ] && command -v apt-get >/dev/null 2>&1; then
+    warn "'$1' missing — installing '$2' (apt)…"
+    sudo apt-get update -qq && sudo apt-get install -y -qq "$2" && command -v "$1" >/dev/null 2>&1 && { ok "installed $2"; return 0; }
+  fi
+  err "required '$1' not found. Install:  sudo apt-get install -y $2   (or re-run with --install-deps)"; exit 3
+}
+need_system() { command -v "$1" >/dev/null 2>&1 || { err "required '$1' not found — $2"; exit 3; }; }
+
+need_system python3 "install Python 3.11+ (sudo apt-get install -y python3)"
+need_system docker  "install Docker (https://docs.docker.com/engine/install/ubuntu/)"
+need_pkg tmux tmux
+need_pkg curl curl
+docker info >/dev/null 2>&1 || { err "Docker daemon not reachable — start it: sudo systemctl start docker"; exit 3; }
+[ -d /proc/driver/nvidia ] || { err "NVIDIA driver not visible under /proc/driver/nvidia — install it first (not auto-installed)."; exit 3; }
+ok "prereqs present: python3/docker(+daemon)/tmux/curl + NVIDIA driver"
 
 step() { printf '\n\033[1;36m==>\033[0m %s\n' "$1"; }
 
