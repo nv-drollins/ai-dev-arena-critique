@@ -105,6 +105,15 @@ h1 .logo { color: var(--accent); }
   background: #0d1f2e;
 }
 
+/* Live Stack panel (replaces the audience selector) */
+.stack-panel { margin-bottom: 16px; display: flex; flex-direction: column; gap: 8px; }
+.stack-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+.stack-ico { font-size: 18px; line-height: 1.4; }
+.stack-role { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.stack-model { font-size: 13px; color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
+.stack-host { font-size: 11px; color: var(--muted); }
+
 /* Action buttons */
 .actions {
   display: flex;
@@ -268,11 +277,11 @@ h1 .logo { color: var(--accent); }
       <button class="mode-btn" data-mode="replay" onclick="selectMode(this)">Replay</button>
     </div>
 
-    <h2>Audience</h2>
-    <div class="audience-selector">
-      <button class="audience-btn active" data-audience="broad" onclick="selectAudience(this)">Broad</button>
-      <button class="audience-btn" data-audience="developers" onclick="selectAudience(this)">Developers</button>
-      <button class="audience-btn" data-audience="executives" onclick="selectAudience(this)">Executives</button>
+    <h2>Live Stack</h2>
+    <div class="stack-panel" id="stackPanel">
+      <div class="stack-row"><span class="stack-ico">✍️</span><div><div class="stack-role">Writer · autonomous agent</div><div class="stack-model" id="stackWriter">…</div><div class="stack-host" id="stackWriterHost">Nemotron on DGX Spark</div></div></div>
+      <div class="stack-row"><span class="stack-ico">🔎</span><div><div class="stack-role">Reviewer · code judgment</div><div class="stack-model" id="stackCritic">…</div><div class="stack-host">70B · tensor-parallel across both Sparks</div></div></div>
+      <div class="stack-row"><span class="stack-ico">⚡</span><div><div class="stack-role">Acceleration</div><div class="stack-model">MTP speculative decoding + prefix caching</div><div class="stack-host">on-box · all-NVIDIA · air-gapped</div></div></div>
     </div>
 
     <div class="actions">
@@ -320,7 +329,7 @@ const API = '/api';
 let selectedChallenge = null;
 let currentSession = null;
 let selectedMode = 'agentic';
-let selectedAudience = 'broad';
+let selectedAudience = 'developers';  // fixed for this demo (audience selector removed)
 
 async function loadChallenges() {
   const resp = await fetch(API + '/challenges');
@@ -353,12 +362,6 @@ function selectMode(btn) {
   document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   selectedMode = btn.dataset.mode;
-}
-
-function selectAudience(btn) {
-  document.querySelectorAll('.audience-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  selectedAudience = btn.dataset.audience;
 }
 
 /* Shared real-time channel: Operator -> Arena/Theater viewers, instant. */
@@ -511,8 +514,25 @@ async function pollSession() {
   }, 2000);
 }
 
+// Populate the Live Stack panel from the running config (real models, not hardcoded).
+async function loadStack() {
+  try {
+    const c = await (await fetch(API + '/config')).json();
+    const w = document.getElementById('stackWriter');
+    const cr = document.getElementById('stackCritic');
+    const wh = document.getElementById('stackWriterHost');
+    if (w && c.writer_model) w.textContent = c.writer_model;
+    if (cr && c.critic_model) cr.textContent = c.critic_model;
+    if (wh && c.writer_url) {
+      const host = (c.writer_url.match(/\/\/([^:/]+)/) || [,''])[1];
+      wh.textContent = 'Nemotron · DGX Spark' + (host ? ' (' + host + ')' : '');
+    }
+  } catch (e) { /* leave the sensible defaults in the markup */ }
+}
+
 // Init
 loadChallenges();
+loadStack();
 </script>
 </body>
 </html>
