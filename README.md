@@ -68,7 +68,7 @@ Node IPs and ports live in [`bin/arena.conf`](bin/arena.conf) — edit it for yo
 One-time bring-up, run **in parallel** on the two boxes (they wait for each other):
 
 ```bash
-git clone https://github.com/nv-drollins/spark-cluster-ai-dev.git ai-dev-arena
+git clone https://github.com/nv-drollins/ai-dev-arena-critique.git ai-dev-arena
 cd ai-dev-arena
 cp bin/arena.conf bin/arena.conf.local   # edit node IPs/ports for your cluster
 

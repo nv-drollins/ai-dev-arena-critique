@@ -92,7 +92,7 @@ huggingface-cli download openai/gpt-oss-120b --local-dir ~/.cache/huggingface
 
 ### 1.5 The repo
 ```
-git clone https://github.com/nv-drollins/spark-cluster-ai-dev ai-dev-arena
+git clone https://github.com/nv-drollins/ai-dev-arena-critique ai-dev-arena
 cd ai-dev-arena
 ```
 
