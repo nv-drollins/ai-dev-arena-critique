@@ -787,17 +787,23 @@ async def run_agentic(work_dir: Path, challenge: dict, broadcast) -> list:
         os.path.expanduser("~/.hermes/hermes-agent/venv/bin/python") + " -m hermes_cli.main")
     profile = os.environ.get("HERMES_PROFILE_AGENTIC", "nemo")
 
-    # Build a focused task prompt from the challenge (its own description + test cmd).
+    # Build a focused task prompt. Kept deliberately tight: the demo needs a fast,
+    # surgical fix — over-exploration (re-reading files, extra sanity checks) is what
+    # blew agentic runs out to 5-7 min. Push for minimal steps + a single confirming test.
     test_cmd = ""
     for t in (challenge.get("validation", {}).get("tests", []) or []):
         test_cmd = t.replace("{{repo_path}}", str(repo))
         break
     task = (
-        f"You are in a Flask app at {repo}. Task: {challenge.get('title','')} — "
-        f"{challenge.get('description','')}. "
-        f"Steps: (1) read app.py to understand the code, (2) fix the issue in app.py, "
-        f"(3) run the tests: {test_cmd}  (4) if any fail, read the error, fix, and re-run "
-        f"until they pass. Do NOT edit files under tests/. Report the final pytest result."
+        f"You are in a Flask app at {repo}. Fix this issue in app.py: "
+        f"{challenge.get('title','')} — {challenge.get('description','')}. "
+        f"Work FAST and minimally — this is a live demo:\n"
+        f"1. Read app.py ONCE to find the relevant code.\n"
+        f"2. Make the SMALLEST change to app.py that fixes it (one focused edit).\n"
+        f"3. Run the tests ONCE to confirm: {test_cmd}\n"
+        f"4. Only if a test fails, make ONE more targeted fix and re-run; otherwise STOP.\n"
+        f"Do NOT edit files under tests/. Do NOT write extra scripts or explore beyond app.py. "
+        f"Do NOT re-read files you've already seen. Stop as soon as the tests pass."
     )
 
     cmd = f'cd {shlex_quote(str(repo))} && {hermes_bin} chat -p {shlex_quote(profile)} --yolo -q {shlex_quote(task)}'
@@ -886,7 +892,7 @@ async def run_agentic(work_dir: Path, challenge: dict, broadcast) -> list:
 
     pump_task = asyncio.create_task(pump())
     try:
-        await asyncio.wait_for(proc.wait(), timeout=int(os.environ.get("AGENTIC_TIMEOUT", "540")))
+        await asyncio.wait_for(proc.wait(), timeout=int(os.environ.get("AGENTIC_TIMEOUT", "240")))
     except asyncio.TimeoutError:
         proc.kill()
         await broadcast("warning", "Agentic run hit the time limit — scoring whatever it produced.")
