@@ -46,6 +46,7 @@ hf_cache/
 .env
 .env.*
 config.local.*
+bin/arena.conf.local
 
 # Local editor / IDE files
 *.swp
