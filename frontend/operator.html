@@ -114,6 +114,17 @@ h1 .logo { color: var(--accent); }
 .stack-model { font-size: 13px; color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
 .stack-host { font-size: 11px; color: var(--muted); }
 
+/* Workflow diagram */
+.flow { width: 100%; height: auto; margin-top: 4px; }
+.fl-node rect { fill: var(--bg); stroke: var(--border); stroke-width: 1; }
+.fl-hero rect { fill: #0d1f2e; stroke: var(--accent); stroke-width: 1.5; }
+.fl-score rect { fill: #0d1f2e; stroke: var(--accent); stroke-width: 1; }
+.fl-t { fill: #f0f4f8; font-size: 12px; font-weight: 700; text-anchor: middle; }
+.fl-hero .fl-t { fill: var(--accent); }
+.fl-s { fill: #c8d4e0; font-size: 10.5px; text-anchor: middle; }
+.fl-loop { fill: #bfe4f4; font-size: 11px; font-weight: 600; text-anchor: middle; font-variant-numeric: tabular-nums; }
+.fl-a { stroke: #4a9ec2; stroke-width: 2; }
+
 /* Action buttons */
 .actions {
   display: flex;
@@ -297,6 +308,38 @@ h1 .logo { color: var(--accent); }
       <a class="link-btn" id="theaterLink" target="_blank" href="/theater">↗ Code Theater</a>
       <a class="link-btn" id="liveLink" target="_blank" href="/live">↗ Live App</a>
     </div>
+
+    <h2 style="margin-top:18px;">Workflow</h2>
+    <svg class="flow" viewBox="0 0 520 132" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Agentic workflow diagram">
+      <defs>
+        <marker id="arw" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
+          <path d="M0,0 L6,3.5 L0,7 Z" fill="#2f6f8f"/>
+        </marker>
+      </defs>
+      <!-- Challenge -->
+      <g class="fl-node"><rect x="4" y="46" width="86" height="40" rx="7"/>
+        <text x="47" y="63" class="fl-t">📋 Challenge</text>
+        <text x="47" y="77" class="fl-s">buggy repo</text></g>
+      <line x1="90" y1="66" x2="118" y2="66" class="fl-a" marker-end="url(#arw)"/>
+      <!-- Agent loop -->
+      <g class="fl-node fl-hero"><rect x="120" y="10" width="150" height="112" rx="8"/>
+        <text x="195" y="32" class="fl-t">🤖 Agentic Hermes</text>
+        <text x="195" y="48" class="fl-s">Nemotron-30B · local</text>
+        <text x="195" y="68" class="fl-loop">📖 read → ✏️ edit</text>
+        <text x="195" y="84" class="fl-loop">🧪 test → ↻ iterate</text>
+        <text x="195" y="104" class="fl-s">self-verifies vs pytest</text></g>
+      <line x1="270" y1="66" x2="298" y2="66" class="fl-a" marker-end="url(#arw)"/>
+      <!-- Review -->
+      <g class="fl-node"><rect x="300" y="40" width="104" height="52" rx="7"/>
+        <text x="352" y="59" class="fl-t">🔎 70B Review</text>
+        <text x="352" y="73" class="fl-s">both Sparks</text>
+        <text x="352" y="86" class="fl-s">verdict → score</text></g>
+      <line x1="404" y1="66" x2="432" y2="66" class="fl-a" marker-end="url(#arw)"/>
+      <!-- Score -->
+      <g class="fl-node fl-score"><rect x="434" y="46" width="82" height="40" rx="7"/>
+        <text x="475" y="63" class="fl-t">📊 Score</text>
+        <text x="475" y="77" class="fl-s">/ 100</text></g>
+    </svg>
   </div>
 
   <div class="card session-info" id="sessionInfo">
