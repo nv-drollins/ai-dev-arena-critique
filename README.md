@@ -48,7 +48,7 @@ air-gapped.
 | **Container** | Docker + `nvidia-container-toolkit`; the `vllm/vllm-openai:v0.27.1` image (~30 GB, pulled on install) |
 | **Runtime** | Python 3.11+, `tmux`, `git`, `curl`, `ssh` between the two boxes (key-based) — these must already be present; the installer checks for them, it does not install them |
 | **Cluster** | **[Ray](https://www.ray.io/)** — the distributed framework vLLM uses to run the 70B reviewer tensor-parallel across both Sparks. Set up automatically by `install-head.sh` / `install-worker.sh` (inside the vLLM container), so you don't install it yourself |
-| **Agent** | **[Hermes Agent](https://hermes-agent.nousresearch.com)** on the head node — drives the writer as an autonomous agent. **Install this separately** (the Arena installer does not); then create the `nemo` profile shown below |
+| **Agent** | **[Hermes Agent](https://hermes-agent.nousresearch.com)** on the head node — drives the writer as an autonomous agent. **`install-head.sh` installs it and creates the `nemo` profile for you** (needs internet on first install); no manual step required |
 | **Weights** | `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4` (writer) + `llama-3.3-nemotron-70b-feedback` (reviewer), auto-downloaded into each Spark's `~/.cache/huggingface` on first launch (several hundred GB — **not** in the repo) |
 
 Roles used below: **head** = the Spark running the orchestrator + reviewer shard;
@@ -60,9 +60,10 @@ Node IPs and ports live in [`bin/arena.conf`](bin/arena.conf) — edit it for yo
 ## Installation
 
 > **What the installer does:** checks prerequisites, pulls the vLLM image, creates a
-> Python venv + installs `requirements.txt`, and brings up the **Ray** cluster + the
-> orchestrator. **What it does *not* do:** install Python/Docker/the NVIDIA driver
-> (prerequisites), or install **Hermes Agent** — do those first.
+> Python venv + installs `requirements.txt`, **installs Hermes Agent + creates the
+> agentic `nemo` profile**, and brings up the **Ray** cluster + the orchestrator.
+> **What it does *not* do:** install Python/Docker/the NVIDIA driver — those are
+> prerequisites you set up first.
 
 One-time bring-up, run **in parallel** on the two boxes (they wait for each other):
 
@@ -72,31 +73,24 @@ cd ai-dev-arena
 cp bin/arena.conf bin/arena.conf.local   # edit node IPs/ports for your cluster
 
 # on the HEAD Spark:
-bash bin/install-head.sh      # prereq check, pull vLLM image, venv + deps,
-                              # Ray head, orchestrator on :8080
+bash bin/install-head.sh      # prereqs, vLLM image, venv + deps, Hermes + nemo
+                              # profile, Ray head, orchestrator on :8080
 
 # on the WORKER Spark (in parallel):
-bash bin/install-worker.sh    # prereq check, Ray worker joins the head
+bash bin/install-worker.sh    # prereqs, Ray worker joins the head
 ```
 
-Then the two agentic-specific pieces:
+Then start the writer vLLM (with tool-calling + MTP + prefix caching) **on the
+worker**:
 
 ```bash
-# 1) Writer vLLM with tool-calling + MTP + prefix caching (run on the WORKER):
 bash bin/launch-writer.sh     # serves nemotron-lightning-30b on :8001
-
-# 2) Install Hermes Agent on the HEAD (if not already), then create a profile
-#    pointed at the local writer:
-#    curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
-hermes profile create nemo
-hermes config set model.provider custom            -p nemo
-hermes config set model.base_url http://<worker-ip>:8001/v1 -p nemo
-hermes config set model.default  nemotron-lightning-30b     -p nemo
-hermes config set model.api_key  dummy-key         -p nemo
-hermes config set model.context_length 64000       -p nemo
-hermes config set model.max_tokens     8192        -p nemo --force
-hermes config set agent.max_turns      12          -p nemo --force
 ```
+
+That's it — `install-head.sh` already installed Hermes and wired the `nemo` profile
+to the writer (host/port come from `arena.conf`). To customize the agent profile,
+override `HERMES_*` in `arena.conf` before installing, or re-run the profile step
+by hand — see [Cluster ops](docs/CLUSTER_OPS.md).
 
 The orchestrator spawns `hermes chat -p nemo` per agentic run — that profile is what
 makes the agent talk to your local Nemotron.

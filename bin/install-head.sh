@@ -46,16 +46,9 @@ need curl
 [ -d /proc/driver/nvidia ] || { err "no NVIDIA driver visible under /proc/driver/nvidia"; exit 3; }
 ok "prereqs present: python3/docker/tmux/git/curl + NVIDIA driver"
 
-# Hermes Agent is required for the AGENTIC demo mode (it drives the writer as an
-# agent). Not needed for replay, and you may install it after the Arena — so this
-# is an advisory, not a hard stop.
-if command -v hermes >/dev/null 2>&1; then
-  ok "Hermes Agent found — agentic mode available (remember to create the 'nemo' profile)"
-else
-  warn "Hermes Agent not found — AGENTIC mode needs it. Install it before running agentic:"
-  warn "    curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
-  warn "  (Replay mode works without Hermes.)"
-fi
+# Hermes Agent drives the writer as an autonomous agent (agentic mode). We install
+# it and set up the profile automatically further down (step 3b) once the writer's
+# host/port are known from arena.conf. Replay mode works without it.
 
 step "1. docker: pull vLLM image (if not already cached)"
 if docker image inspect "$VLLM_IMAGE" >/dev/null 2>&1; then
@@ -103,6 +96,48 @@ else
   python -m pip install --quiet --upgrade pip wheel
   python -m pip install --quiet -r requirements.txt
   ok "venv + deps installed"
+fi
+
+# --- 3b. Hermes Agent + agentic profile --------------------------------------
+# Install Hermes (if missing) and create the profile that drives the writer as an
+# agent. Idempotent: re-running is safe. Reads writer host/port from arena.conf.
+# Resolve a hermes command: PATH first, then the standard venv install location.
+hermes_cmd() {
+  if command -v hermes >/dev/null 2>&1; then echo "hermes";
+  elif [ -x "$HOME/.hermes/hermes-agent/venv/bin/python" ]; then
+    echo "$HOME/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main";
+  else echo ""; fi
+}
+HERMES="$(hermes_cmd)"
+if [ -z "$HERMES" ]; then
+  step "3b. install Hermes Agent (agentic mode needs it)"
+  if curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash; then
+    export PATH="$HOME/.local/bin:$PATH"; hash -r 2>/dev/null || true
+    HERMES="$(hermes_cmd)"
+    [ -n "$HERMES" ] && ok "Hermes Agent installed" \
+      || warn "Hermes installed but not found yet — open a new shell and re-run install-head.sh to finish the profile"
+  else
+    warn "Hermes install failed — install manually, then re-run this script:"
+    warn "    curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+  fi
+fi
+
+if [ -n "$HERMES" ]; then
+  step "3b. Hermes profile '${HERMES_PROFILE}' -> writer ${WRITER_HOST_SPARK}:${WRITER_PORT}"
+  $HERMES profile create "$HERMES_PROFILE" >/dev/null 2>&1 || true   # no-op if it exists
+  hset() { $HERMES config set "$1" "$2" --force -p "$HERMES_PROFILE" >/dev/null 2>&1 || true; }
+  hset model.provider        custom
+  hset model.base_url        "http://${WRITER_HOST_SPARK}:${WRITER_PORT}/v1"
+  hset model.default         "$WRITER_SERVED"
+  hset model.api_key         dummy-key
+  hset model.context_length  "$HERMES_CONTEXT_LEN"
+  hset model.max_tokens      "$HERMES_MAX_TOKENS"
+  hset agent.max_turns       "$HERMES_MAX_TURNS"
+  hset auxiliary.compression.context_length "$HERMES_CONTEXT_LEN"
+  hset auxiliary.compression.max_tokens     "$HERMES_MAX_TOKENS"
+  ok "Hermes profile '${HERMES_PROFILE}' ready — agentic mode good to go"
+else
+  warn "skipping Hermes profile (Hermes not available) — agentic mode unavailable; replay still works"
 fi
 
 step "4. stage helper scripts into ~/"
