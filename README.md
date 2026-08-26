@@ -43,11 +43,12 @@ air-gapped.
 
 | | |
 |---|---|
-| **Hardware** | 2× NVIDIA DGX Spark (GB10 / Grace Blackwell), one high-speed link between them |
+| **Hardware** | 2× NVIDIA DGX Spark (GB10 / Grace Blackwell), physically stacked and connected over the high-speed link. Follow NVIDIA's guide: **[Connect two Sparks (stacked)](https://build.nvidia.com/spark/connect-two-sparks/stacked-sparks)** |
 | **OS / drivers** | Linux with the NVIDIA driver (visible under `/proc/driver/nvidia`) |
 | **Container** | Docker + `nvidia-container-toolkit`; the `vllm/vllm-openai:v0.27.1` image (~30 GB, pulled on install) |
-| **Runtime** | Python 3.11+, `tmux`, `git`, `curl`, `ssh` between the two boxes (key-based) |
-| **Agent** | [Hermes Agent](https://hermes-agent.nousresearch.com) installed on the head node (drives the writer as an agent) |
+| **Runtime** | Python 3.11+, `tmux`, `git`, `curl`, `ssh` between the two boxes (key-based) — these must already be present; the installer checks for them, it does not install them |
+| **Cluster** | **[Ray](https://www.ray.io/)** — the distributed framework vLLM uses to run the 70B reviewer tensor-parallel across both Sparks. Set up automatically by `install-head.sh` / `install-worker.sh` (inside the vLLM container), so you don't install it yourself |
+| **Agent** | **[Hermes Agent](https://hermes-agent.nousresearch.com)** on the head node — drives the writer as an autonomous agent. **Install this separately** (the Arena installer does not); then create the `nemo` profile shown below |
 | **Weights** | `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4` (writer) + `llama-3.3-nemotron-70b-feedback` (reviewer), auto-downloaded into each Spark's `~/.cache/huggingface` on first launch (several hundred GB — **not** in the repo) |
 
 Roles used below: **head** = the Spark running the orchestrator + reviewer shard;
@@ -57,6 +58,11 @@ Node IPs and ports live in [`bin/arena.conf`](bin/arena.conf) — edit it for yo
 ---
 
 ## Installation
+
+> **What the installer does:** checks prerequisites, pulls the vLLM image, creates a
+> Python venv + installs `requirements.txt`, and brings up the **Ray** cluster + the
+> orchestrator. **What it does *not* do:** install Python/Docker/the NVIDIA driver
+> (prerequisites), or install **Hermes Agent** — do those first.
 
 One-time bring-up, run **in parallel** on the two boxes (they wait for each other):
 
@@ -79,7 +85,9 @@ Then the two agentic-specific pieces:
 # 1) Writer vLLM with tool-calling + MTP + prefix caching (run on the WORKER):
 bash bin/launch-writer.sh     # serves nemotron-lightning-30b on :8001
 
-# 2) A Hermes profile pointed at the local writer (run on the HEAD):
+# 2) Install Hermes Agent on the HEAD (if not already), then create a profile
+#    pointed at the local writer:
+#    curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
 hermes profile create nemo
 hermes config set model.provider custom            -p nemo
 hermes config set model.base_url http://<worker-ip>:8001/v1 -p nemo
