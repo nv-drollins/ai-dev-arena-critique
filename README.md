@@ -55,6 +55,28 @@ Roles used below: **head** = the Spark running the orchestrator + reviewer shard
 **worker** = the Spark serving the writer (`:8001`) + the reviewer's other TP shard.
 Node IPs and ports live in [`bin/arena.conf`](bin/arena.conf) — edit it for your LAN.
 
+### One-time Docker prerequisite (run on BOTH Sparks, before the installers)
+
+The DGX Spark base image ships Docker + driver + container toolkit, but a fresh user
+still needs to be in the `docker` group and have the NVIDIA runtime registered. Do
+this **once per node, then log out and back in** so the group takes effect:
+
+```bash
+sudo usermod -aG docker $USER
+sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker
+# then: log out and back in (the group change only applies to a new login session)
+```
+
+Verify it worked (no sudo, and the nvidia runtime is listed):
+
+```bash
+docker info | grep -i runtimes    # should include 'nvidia'
+```
+
+The installers **check** for this and stop with the command above if it's missing —
+they no longer modify group membership themselves (that's what forced the awkward
+mid-install re-login before).
+
 ---
 
 ## Installation
@@ -90,10 +112,10 @@ bash bin/install-worker.sh    # prereqs, Ray worker joins the head
 > you exactly what to install if any are missing. The head installer also checks it
 > can reach the worker over key-based SSH and prints the `ssh-copy-id` fix if not.
 >
-> **DGX Spark base image?** It already ships Docker + driver + container toolkit, so
-> the installers just *wire them up* for you (idempotently): add your user to the
-> `docker` group and register the NVIDIA runtime with Docker
-> (`nvidia-ctk runtime configure`). Already set up? They detect it and skip.
+> **Docker not usable as your user?** The installers *check* that `docker info` works
+> without sudo and that the NVIDIA runtime is registered — they stop with the exact
+> fix if not. Do the [one-time Docker prerequisite](#one-time-docker-prerequisite-run-on-both-sparks-before-the-installers)
+> (group + runtime, then re-login) before running them.
 >
 > **Hermes setup wizard (Quick / Full / Blank Slate)?** `install-head.sh` runs the
 > Hermes installer, which may prompt you to pick a setup style. **Choose Blank
