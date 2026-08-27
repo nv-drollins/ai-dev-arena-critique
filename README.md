@@ -104,6 +104,11 @@ bash bin/install-worker.sh    # prereqs, Ray worker joins the head
 > won't use. Quick Setup also works (just ignore its model choice — the `nemo`
 > profile overrides it); avoid Full Setup (it configures gateways/tools the demo
 > doesn't need). If a step insists on a model and won't skip, pick anything.
+>
+> The remaining wizard prompts: for **terminal backend** choose **"Keep current
+> (local)"** (the agent must run tools on the box), and for the final **"What next?"**
+> choose **"Start with everything disabled — finish now (most minimal)"**. The `nemo`
+> profile supplies everything the arena uses, so the minimal base is exactly right.
 
 Then bring up the two models and the orchestrator — **launch the writer on the
 worker, the critic on the head, then start the orchestrator on the head:**
