@@ -95,10 +95,15 @@ before joining, but doing them in order is the reliable path.)
 ```bash
 git clone https://github.com/nv-drollins/ai-dev-arena-critique.git ai-dev-arena
 cd ai-dev-arena
-# Optional: override node IPs/ports without editing the tracked file. Create a
-# SMALL snippet (NOT a copy of arena.conf) — only the vars you're changing:
-#   printf 'HEAD_NODE_IP="192.168.1.159"\nWRITER_HOST_SPARK="192.168.1.149"\n' > bin/arena.conf.local
-# It's gitignored and sourced last (arena.conf.local > env > defaults).
+# Optional overrides — CREATE bin/arena.conf.local (it does NOT exist in the repo;
+# it's gitignored). Put ONLY the vars you're changing in it, e.g. node IPs and your
+# HF token. Example (adjust to your cluster):
+#   cat > bin/arena.conf.local <<'EOF'
+#   HEAD_NODE_IP="192.168.1.159"
+#   WRITER_HOST_SPARK="192.168.1.149"
+#   HF_TOKEN="hf_your_token_here"
+#   EOF
+# It's sourced last: arena.conf.local > env > arena.conf defaults.
 
 # 1) FIRST, on the HEAD Spark — wait for it to finish (Ray head up on :6379):
 bash bin/install-head.sh      # prereqs, vLLM image, venv + deps, Hermes + nemo
@@ -167,12 +172,21 @@ GB — not in the repo). So `launch-writer.sh` (~21GB) and especially `launch-cr
 
 > **Faster downloads:** set a HuggingFace token to avoid unauthenticated rate limits
 > (matters most for the 141GB critic). Put `HF_TOKEN="hf_..."` in `bin/arena.conf.local`
-> (or `export HF_TOKEN=hf_...` before launching) — the launchers pass it into the
-> writer/critic containers automatically. Without it you'll see "You are sending
-> unauthenticated requests to the HF Hub" and slower/throttled pulls.
+> **before running the installers** (the token must be in the Ray containers' env when
+> they start — an `export` after they're already up won't reach the worker's shard).
+> Without it you'll see "You are sending unauthenticated requests to the HF Hub" and
+> slower/throttled pulls.
+
 Watch the writer with `docker logs -f arena-writer` (worker); watch the critic in its
 tmux session (`tmux attach -t critic` on the head). Each is ready when
 `curl -s http://localhost:PORT/v1/models` returns the model (writer :8001, critic :8002).
+
+Watch the critic's **download size** climb toward ~141GB (run on the head):
+
+```bash
+du -sh ~/.cache/huggingface/hub/*Llama*70[Bb]*      # writer:  *Nemotron-3.5-Lightning*
+watch -n 10 'du -sh ~/.cache/huggingface/hub/*Llama*70[Bb]*'   # live, refreshes every 10s
+```
 
 `install-head.sh` already installed Hermes and wired the `nemo` profile to the writer
 (host/port come from `arena.conf`); the orchestrator spawns `hermes chat -p nemo` per

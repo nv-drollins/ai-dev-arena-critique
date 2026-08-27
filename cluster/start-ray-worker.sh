@@ -17,5 +17,6 @@ bash ~/run_cluster.sh "$VLLM_IMAGE" "$HEAD_NODE_IP" --worker ~/.cache/huggingfac
   -e MASTER_ADDR="$HEAD_NODE_IP" \
   -e VLLM_NVFP4_GEMM_BACKEND=marlin \
   -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+  ${HF_TOKEN:+-e HF_TOKEN="$HF_TOKEN"} \
   -e VLLM_FLASHINFER_ALLREDUCE_BACKEND=trtllm \
   -e VLLM_USE_FLASHINFER_MOE_FP4=0
