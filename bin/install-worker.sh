@@ -72,7 +72,7 @@ fi
 
 step() { printf '\n\033[1;36m==>\033[0m %s\n' "$1"; }
 
-step "1. docker: vLLM image"
+step "1. docker: vLLM images (Ray/critic image + the writer image)"
 if docker image inspect "$VLLM_IMAGE" >/dev/null 2>&1; then
   ok "image $VLLM_IMAGE present"
 elif docker pull "$VLLM_IMAGE" >/dev/null 2>&1; then
@@ -80,6 +80,16 @@ elif docker pull "$VLLM_IMAGE" >/dev/null 2>&1; then
 else
   err "failed to pull $VLLM_IMAGE — do you have nvcr.io access? (docker login nvcr.io)"
   exit 4
+fi
+# The WRITER runs on this node via launch-writer.sh with a DIFFERENT image
+# (Docker Hub vllm-openai, has the MTP/step3p5 features). Pull it now so
+# launch-writer.sh doesn't fail its preflight.
+if docker image inspect "$WRITER_IMAGE" >/dev/null 2>&1; then
+  ok "writer image $WRITER_IMAGE present"
+elif docker pull "$WRITER_IMAGE" >/dev/null 2>&1; then
+  ok "writer image pulled ($WRITER_IMAGE)"
+else
+  warn "could not pull writer image $WRITER_IMAGE — pull it before launch-writer.sh: docker pull $WRITER_IMAGE"
 fi
 
 step "2. parser file (identical on head & worker — content must match bit-for-bit)"
