@@ -14,7 +14,11 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=bin/arena.conf
 . "$HERE/arena.conf"
 
-CRITIC_GPU_FRAC="${CRITIC_GPU_FRAC:-0.70}"     # leaves headroom for the writer's shard
+CRITIC_GPU_FRAC="${CRITIC_GPU_FRAC:-0.62}"     # fits alongside the writer, which
+                                               # co-resides on the worker node (~40GB).
+                                               # 0.70 OOMs (writer leaves ~81GB free of
+                                               # 121; 0.70=85GB). Raise if the writer
+                                               # isn't sharing the worker's GPU.
 CRITIC_MAXLEN="${CRITIC_MAXLEN:-16384}"        # review prompt is big-ish; output modest
 
 # --- preflight: fail early with a clear "install/fix X first" message ----------

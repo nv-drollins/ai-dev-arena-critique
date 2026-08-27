@@ -108,6 +108,16 @@ else
   ok "parser already at $PARSER_FILE"
 fi
 
+step "2b. stage cluster scripts into ~/"
+# start-ray-worker.sh runs `bash ~/start-ray-worker.sh`, which sources ~/run_cluster.sh.
+# Stage them from the repo first — without this the Ray join fails silently (the file
+# doesn't exist), the worker never joins, and the 70B critic hangs forever waiting for
+# the 2nd GPU.
+for s in run_cluster.sh start-ray-worker.sh; do
+  [ -f "cluster/$s" ] && cp -f "cluster/$s" ~/ && ok "staged ~/$s" \
+    || warn "cluster/$s not found in repo — cannot stage (Ray join will fail)"
+done
+
 step "3. start Ray WORKER"
 existing=$(docker ps --format '{{.Names}}' | grep -E '^node-[0-9]+$' | head -1)
 if [ -n "$existing" ]; then
