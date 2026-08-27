@@ -152,6 +152,10 @@ tmux new -s critic 'bash bin/launch-critic.sh'   # serves on :8002; detach Ctrl-
 
 # 3) ORCHESTRATOR — on the HEAD (once both models are serving):
 bash bin/restart-orch.sh      # starts the arena on :8080, wired to writer + critic
+
+# Verify the whole stack in one shot (run on the HEAD):
+bash bin/verify-cluster.sh    # ✓/✗ per component (Ray 2 GPUs, writer, critic,
+                              # grader pytest, orchestrator) with the fix for each ✗
 ```
 
 **Model weights download on first launch, not during install** (they're hundreds of
