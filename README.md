@@ -97,12 +97,13 @@ bash bin/install-worker.sh    # prereqs, Ray worker joins the head
 >
 > **Hermes setup wizard (Quick / Full / Blank Slate)?** `install-head.sh` runs the
 > Hermes installer, which may prompt you to pick a setup style. **Choose Blank
-> Slate.** The arena drives Hermes through the `nemo` profile (created for you in
-> the same install step, pointed at the local writer), so the base config only needs
-> to *exist* — you don't want the wizard pre-wiring a hosted provider or messaging
-> platforms you won't use. Quick Setup also works (just ignore its model choice —
-> the `nemo` profile overrides it); avoid Full Setup (it configures gateways/tools
-> the demo doesn't need). If it asks for a model and won't skip, pick anything.
+> Slate**, and when it asks for a provider pick **"Leave Unchanged"**. The arena
+> drives Hermes through the `nemo` profile (created for you in the same install
+> step, pointed at the local writer), so the base config only needs to *exist* — you
+> don't want the wizard pre-wiring a hosted provider or messaging platforms you
+> won't use. Quick Setup also works (just ignore its model choice — the `nemo`
+> profile overrides it); avoid Full Setup (it configures gateways/tools the demo
+> doesn't need). If a step insists on a model and won't skip, pick anything.
 
 Then start the writer vLLM (with tool-calling + MTP + prefix caching) **on the
 worker**:
