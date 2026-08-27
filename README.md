@@ -161,6 +161,12 @@ bash bin/verify-cluster.sh    # ✓/✗ per component (Ray 2 GPUs, writer, criti
 **Model weights download on first launch, not during install** (they're hundreds of
 GB — not in the repo). So `launch-writer.sh` (~21GB) and especially `launch-critic.sh`
 (~141GB) will sit "downloading" for a while the first time before they start serving.
+
+> **Faster downloads:** set a HuggingFace token to avoid unauthenticated rate limits
+> (matters most for the 141GB critic). Put `HF_TOKEN="hf_..."` in `bin/arena.conf.local`
+> (or `export HF_TOKEN=hf_...` before launching) — the launchers pass it into the
+> writer/critic containers automatically. Without it you'll see "You are sending
+> unauthenticated requests to the HF Hub" and slower/throttled pulls.
 Watch the writer with `docker logs -f arena-writer` (worker); watch the critic in its
 tmux session (`tmux attach -t critic` on the head). Each is ready when
 `curl -s http://localhost:PORT/v1/models` returns the model (writer :8001, critic :8002).

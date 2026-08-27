@@ -11,6 +11,11 @@
 # Run this ON the writer node (the box serving :8001).
 set -e
 
+# Pick up optional config (HF_TOKEN etc.) from arena.conf if present next to this script.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=bin/arena.conf
+[ -f "$HERE/arena.conf" ] && . "$HERE/arena.conf" 2>/dev/null || true
+
 # --- preflight: fail early with a clear "install/fix X first" message ----------
 die()  { printf '\033[1;31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
 warn() { printf '\033[1;33m! %s\033[0m\n' "$1" >&2; }
@@ -35,6 +40,7 @@ fi
 docker rm -f arena-writer >/dev/null 2>&1 || true
 docker run -d --name arena-writer --network host --gpus all --shm-size 10.24g \
   -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+  ${HF_TOKEN:+-e HF_TOKEN="$HF_TOKEN"} \
   -v /home/nvidia/.cache/huggingface:/root/.cache/huggingface \
   vllm/vllm-openai:v0.27.1 \
   --model nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4 \

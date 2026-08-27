@@ -33,6 +33,7 @@ echo "[critic] container $C — serving $CRITIC_SERVED (TP=$CRITIC_TP across bot
 docker exec "$C" /bin/bash -lc "
   set -euo pipefail
   export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+  ${HF_TOKEN:+export HF_TOKEN='$HF_TOKEN'}
   vllm serve '$CRITIC_MODEL_HF' \
     --served-model-name '$CRITIC_SERVED' \
     --host 0.0.0.0 --port '$CRITIC_PORT' \
