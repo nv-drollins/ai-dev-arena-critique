@@ -60,7 +60,13 @@ MODEL_NAME = WRITER_MODEL
 # --- State ---
 
 app = FastAPI(title="AI Dev Arena Orchestrator")
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "frontend" / "static")), name="static")
+# Mount /static only if the dir exists — StaticFiles raises at import time otherwise,
+# which crashed the orchestrator on a fresh clone (git doesn't track empty dirs). The
+# frontend is self-contained HTML/JS and doesn't currently use /static, so this is
+# purely defensive.
+_STATIC_DIR = BASE_DIR / "frontend" / "static"
+if _STATIC_DIR.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 sessions: dict[str, dict] = {}
 ws_subscribers: dict[str, list[WebSocket]] = {}
