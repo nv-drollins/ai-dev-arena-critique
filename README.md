@@ -105,20 +105,36 @@ bash bin/install-worker.sh    # prereqs, Ray worker joins the head
 > profile overrides it); avoid Full Setup (it configures gateways/tools the demo
 > doesn't need). If a step insists on a model and won't skip, pick anything.
 
-Then start the writer vLLM (with tool-calling + MTP + prefix caching) **on the
-worker**:
+Then bring up the two models and the orchestrator — **launch the writer on the
+worker, the critic on the head, then start the orchestrator on the head:**
 
 ```bash
+# 1) WRITER — on the WORKER (tool-calling + MTP + prefix caching):
 bash bin/launch-writer.sh     # serves nemotron-lightning-30b on :8001
+                              # first run DOWNLOADS ~21GB of weights — be patient
+
+# 2) CRITIC — on the HEAD (70B, tensor-parallel across BOTH Sparks via Ray):
+#    Runs in the FOREGROUND, so wrap it in tmux — the ~141GB download + load takes
+#    a long time and you don't want it to die if your SSH session drops:
+tmux new -s critic 'bash bin/launch-critic.sh'   # serves on :8002; detach with Ctrl-b d
+                              # (reattach later: tmux attach -t critic)
+
+# 3) ORCHESTRATOR — on the HEAD (once both models are serving):
+bash bin/restart-orch.sh      # starts the arena on :8080, wired to writer + critic
 ```
 
-That's it — `install-head.sh` already installed Hermes and wired the `nemo` profile
-to the writer (host/port come from `arena.conf`). To customize the agent profile,
-override `HERMES_*` in `arena.conf` before installing, or re-run the profile step
-by hand — see [Cluster ops](docs/CLUSTER_OPS.md).
+**Model weights download on first launch, not during install** (they're hundreds of
+GB — not in the repo). So `launch-writer.sh` (~21GB) and especially `launch-critic.sh`
+(~141GB) will sit "downloading" for a while the first time before they start serving.
+Watch the writer with `docker logs -f arena-writer` (worker); watch the critic in its
+tmux session (`tmux attach -t critic` on the head). Each is ready when
+`curl -s http://localhost:PORT/v1/models` returns the model (writer :8001, critic :8002).
 
-The orchestrator spawns `hermes chat -p nemo` per agentic run — that profile is what
-makes the agent talk to your local Nemotron.
+`install-head.sh` already installed Hermes and wired the `nemo` profile to the writer
+(host/port come from `arena.conf`); the orchestrator spawns `hermes chat -p nemo` per
+agentic run — that profile is what makes the agent talk to your local Nemotron. To
+customize the agent profile, override `HERMES_*` in `arena.conf` before installing —
+see [Cluster ops](docs/CLUSTER_OPS.md).
 
 Open the displays:
 
