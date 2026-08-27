@@ -192,6 +192,21 @@ else
   ok "venv + deps installed"
 fi
 
+# Challenge validation + the agent run tests with the SYSTEM python3 (the challenge
+# JSON uses `python3 -m pytest …`), NOT the venv. So pytest + the sample app's deps
+# (flask) must be importable by system python3 too, or every run scores 0/N with
+# "No module named pytest". Install into the user site (PEP-668 safe with --user).
+if python3 -c "import pytest, flask" >/dev/null 2>&1; then
+  ok "system python3 has pytest + flask (challenge grader ready)"
+else
+  step "3a. install pytest + flask for the system python3 (challenge grader)"
+  python3 -m pip install --user --break-system-packages --quiet pytest flask 2>/dev/null \
+    || python3 -m pip install --user --quiet pytest flask 2>/dev/null || true
+  python3 -c "import pytest, flask" >/dev/null 2>&1 \
+    && ok "pytest + flask installed for system python3" \
+    || warn "could not install pytest/flask for system python3 — challenge tests may score 0 (run: python3 -m pip install --user --break-system-packages pytest flask)"
+fi
+
 # --- 3b. Hermes Agent + agentic profile --------------------------------------
 # Install Hermes (if missing) and create the profile that drives the writer as an
 # agent. Idempotent: re-running is safe. Reads writer host/port from arena.conf.
