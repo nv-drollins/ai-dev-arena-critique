@@ -119,10 +119,14 @@ bash bin/launch-writer.sh     # serves nemotron-lightning-30b on :8001
                               # first run DOWNLOADS ~21GB of weights — be patient
 
 # 2) CRITIC — on the HEAD (70B, tensor-parallel across BOTH Sparks via Ray):
-#    Runs in the FOREGROUND, so wrap it in tmux — the ~141GB download + load takes
-#    a long time and you don't want it to die if your SSH session drops:
-tmux new -s critic 'bash bin/launch-critic.sh'   # serves on :8002; detach with Ctrl-b d
-                              # (reattach later: tmux attach -t critic)
+#    FIRST verify the cluster has 2 GPUs (else the 70B hangs forever waiting for
+#    the worker to join — a silent failure mode):
+docker exec "$(docker ps --format '{{.Names}}' | grep -E '^node-[0-9]+$' | head -1)" \
+  ray status | grep GPU        # must show '.../2.0 GPU'. If it shows /1.0, the worker
+                               # didn't join — restart Ray on the worker:
+                               #   (on worker) tmux new -d -s ray-worker 'bash ~/start-ray-worker.sh'
+#    Then launch the critic (runs FOREGROUND — wrap in tmux; ~141GB first-run download):
+tmux new -s critic 'bash bin/launch-critic.sh'   # serves on :8002; detach Ctrl-b then d
 
 # 3) ORCHESTRATOR — on the HEAD (once both models are serving):
 bash bin/restart-orch.sh      # starts the arena on :8080, wired to writer + critic

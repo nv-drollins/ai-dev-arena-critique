@@ -119,9 +119,11 @@ for s in run_cluster.sh start-ray-worker.sh; do
 done
 
 step "3. start Ray WORKER"
+# Only skip if a Ray WORKER container is already running (node-* comes from Ray).
+# Note: arena-writer is NOT a node-* container, so it never trips this.
 existing=$(docker ps --format '{{.Names}}' | grep -E '^node-[0-9]+$' | head -1)
 if [ -n "$existing" ]; then
-  ok "already running worker: $existing (skipping)"
+  ok "already running Ray worker: $existing (skipping)"
 else
   docker ps -aq --filter name=node- | xargs -r docker rm -f >/dev/null 2>&1 || true
   tmux kill-session -t ray-worker 2>/dev/null || true
