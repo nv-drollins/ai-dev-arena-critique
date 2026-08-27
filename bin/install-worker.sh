@@ -106,6 +106,26 @@ for s in run_cluster.sh start-ray-worker.sh; do
 done
 
 step "3. start Ray WORKER"
+# Wait for the HEAD's Ray to be listening on :6379 before joining. Without this,
+# running install-head + install-worker in PARALLEL races: the worker tries to
+# connect before the head's Ray is up, the join silently fails, and Ray ends up
+# seeing only 1 GPU (the 70B critic then hangs forever). Poll up to ~4 min.
+HEAD_RAY_IP="${HEAD_NODE_IP:-192.168.100.10}"
+printf '  waiting for head Ray at %s:6379 ' "$HEAD_RAY_IP"
+ray_ready=0
+for _ in $(seq 1 48); do
+  if (exec 3<>"/dev/tcp/${HEAD_RAY_IP}/6379") 2>/dev/null; then exec 3>&- 3<&-; ray_ready=1; break; fi
+  printf '.'; sleep 5
+done
+echo
+if [ "$ray_ready" = 1 ]; then
+  ok "head Ray is up — joining"
+else
+  warn "head Ray not reachable at ${HEAD_RAY_IP}:6379 after 4 min."
+  warn "  Start (or finish) install-head.sh on the HEAD first, then re-run this."
+  warn "  Joining anyway — if the worker doesn't register, restart it:"
+  warn "    tmux new -d -s ray-worker 'bash ~/start-ray-worker.sh'"
+fi
 # Only skip if a Ray WORKER container is already running (node-* comes from Ray).
 # Note: arena-writer is NOT a node-* container, so it never trips this.
 existing=$(docker ps --format '{{.Names}}' | grep -E '^node-[0-9]+$' | head -1)

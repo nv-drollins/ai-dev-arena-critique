@@ -87,7 +87,10 @@ mid-install re-login before).
 > **What it does *not* do:** install Python/Docker/the NVIDIA driver — those are
 > prerequisites you set up first.
 
-One-time bring-up, run **in parallel** on the two boxes (they wait for each other):
+One-time bring-up. **Run `install-head.sh` on the HEAD FIRST and let it get Ray up,
+THEN run `install-worker.sh` on the worker** — the worker joins the head's Ray, so
+the head must be listening first. (The worker installer now waits for the head's Ray
+before joining, but doing them in order is the reliable path.)
 
 ```bash
 git clone https://github.com/nv-drollins/ai-dev-arena-critique.git ai-dev-arena
@@ -97,12 +100,12 @@ cd ai-dev-arena
 #   printf 'HEAD_NODE_IP="192.168.1.159"\nWRITER_HOST_SPARK="192.168.1.149"\n' > bin/arena.conf.local
 # It's gitignored and sourced last (arena.conf.local > env > defaults).
 
-# on the HEAD Spark:
+# 1) FIRST, on the HEAD Spark — wait for it to finish (Ray head up on :6379):
 bash bin/install-head.sh      # prereqs, vLLM image, venv + deps, Hermes + nemo
                               # profile, Ray head, orchestrator on :8080
 
-# on the WORKER Spark (in parallel):
-bash bin/install-worker.sh    # prereqs, Ray worker joins the head
+# 2) THEN, on the WORKER Spark:
+bash bin/install-worker.sh    # waits for the head's Ray, then the worker joins it
 ```
 
 > **Missing small tools?** Pass `--install-deps` to either installer to auto-`apt`
