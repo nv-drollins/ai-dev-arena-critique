@@ -107,13 +107,23 @@ if ! docker info 2>/dev/null | grep -qi 'Runtimes:.*nvidia' && command -v nvidia
 else
   ok "nvidia container runtime already registered with Docker"
 fi
-# If we just added the group, this shell isn't in it yet. Re-exec under the new
-# group so the docker commands below work without a manual re-login.
+# If we just added the group, this shell isn't in it yet — and `sg`/`newgrp` demand
+# a group password over SSH (they hang/fail). The clean, reliable fix is a one-time
+# re-login: tell the user and stop here. Re-running the installer afterward sails
+# past this block (idempotent) because they'll already be in the group.
 if [ "${NEWGRP_NEEDED:-0}" = 1 ] && ! groups 2>/dev/null | grep -qw docker; then
-  if [ -z "${_ARENA_REEXEC:-}" ]; then
-    warn "re-running under the new 'docker' group (so docker works without re-login)…"
-    exec sg docker "_ARENA_REEXEC=1 bash '$0' $*"
-  fi
+  echo
+  warn "════════════════════════════════════════════════════════════════"
+  warn " You were just added to the 'docker' group, but this shell isn't"
+  warn " in it yet. Finish the one-time setup and re-run:"
+  warn ""
+  warn "     exit        # (or log out of this SSH session)"
+  warn "     # log back in, then:"
+  warn "     cd ~/ai-dev-arena && bash bin/install-head.sh"
+  warn ""
+  warn " (The re-run skips this step — you'll already be in the group.)"
+  warn "════════════════════════════════════════════════════════════════"
+  exit 0
 fi
 
 # head must reach the worker over key-based SSH (Ray + deploy rely on it). This

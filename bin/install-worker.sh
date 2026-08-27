@@ -63,8 +63,11 @@ if ! docker info 2>/dev/null | grep -qi 'Runtimes:.*nvidia' && command -v nvidia
     && ok "nvidia runtime configured + docker restarted" \
     || warn "run: sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker"
 else ok "nvidia runtime already registered with Docker"; fi
-if [ "${NEWGRP_NEEDED:-0}" = 1 ] && ! groups 2>/dev/null | grep -qw docker && [ -z "${_ARENA_REEXEC:-}" ]; then
-  warn "re-running under the new 'docker' group…"; exec sg docker "_ARENA_REEXEC=1 bash '$0' $*"
+if [ "${NEWGRP_NEEDED:-0}" = 1 ] && ! groups 2>/dev/null | grep -qw docker; then
+  echo; warn "You were just added to the 'docker' group, but this shell isn't in it yet."
+  warn "Finish setup + re-run:  exit  (log out/in), then  cd ~/ai-dev-arena && bash bin/install-worker.sh"
+  warn "(The re-run skips this step — you'll already be in the group.)"
+  exit 0
 fi
 
 step() { printf '\n\033[1;36m==>\033[0m %s\n' "$1"; }
