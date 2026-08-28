@@ -22,7 +22,10 @@ REPO="$(cd "$HERE/.." && pwd)"
 # shellcheck source=bin/arena.conf
 . "$HERE/arena.conf" 2>/dev/null || true
 
-DEST="${1:-/media/$USER}"
+# Default: write into the repo's offline/ folder (created if needed), then copy that
+# folder to USB manually — avoids the varying /media/$USER/<vendor>/ mount path.
+# Override by passing an explicit DEST (e.g. a mounted USB path) as $1.
+DEST="${1:-$REPO/offline}"
 SKIP_MODELS=0
 [ "${2:-}" = "--no-models" ] && SKIP_MODELS=1
 
@@ -31,11 +34,20 @@ say()  { printf '%s==>%s %s\n' "$G" "$Z" "$*"; }
 warn() { printf '%s!%s %s\n' "$Y" "$Z" "$*" >&2; }
 die()  { printf '%s✗%s %s\n' "$Rr" "$Z" "$*" >&2; exit 1; }
 
-[ -d "$DEST" ] || die "DEST '$DEST' does not exist — mount your USB drive first, or pass a path."
+# Create DEST if it doesn't exist (the repo offline/ folder won't exist yet).
+mkdir -p "$DEST" || die "cannot create DEST '$DEST'"
+# Warn if the target filesystem looks too small — the bundle is hundreds of GB and
+# writing it into the repo means this disk needs the room ON TOP of the model cache.
+avail_gb=$(df -BG --output=avail "$DEST" 2>/dev/null | tail -1 | tr -dc '0-9')
+if [ -n "$avail_gb" ] && [ "$avail_gb" -lt 200 ]; then
+  warn "only ${avail_gb}GB free on $DEST — the bundle can be 150-350GB. Free space or"
+  warn "pass a USB path instead: bash bin/bundle-offline.sh /media/$USER/<vendor>"
+fi
 node="$(hostname)"
 OUT="$DEST/arena-offline-$node"
 mkdir -p "$OUT"
 say "bundling node '$node' -> $OUT"
+say "(copy this folder to your USB drive afterward)"
 
 # 1. Docker images (both writer + Ray/critic images if present)
 say "1/6 docker images (this is slow — ~40GB)"
@@ -92,7 +104,11 @@ mkdir -p "$OUT/wheels"
 
 sync
 say "DONE — node '$node' bundled to $OUT"
-du -sh "$OUT"/* 2>/dev/null
+du -sh "$OUT" 2>/dev/null
 echo
-echo "At the event: copy this folder to the matching freshly-imaged node and run:"
-echo "    bash <repo>/bin/restore-offline.sh $OUT"
+echo "NEXT: copy the whole folder below onto your USB drive (the mount path varies,"
+echo "e.g. /media/$USER/<vendor>/ — copy it wherever your USB mounts):"
+echo "    $OUT"
+echo
+echo "At the event, on the matching freshly-imaged node, from the USB:"
+echo "    bash <repo>/bin/restore-offline.sh /media/$USER/<vendor>/arena-offline-$node"

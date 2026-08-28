@@ -68,3 +68,6 @@ tmp/
 **/*.bin
 **/*.pt
 **/*.ckpt
+
+# Offline event bundle output (huge — copy to USB, never commit)
+offline/
