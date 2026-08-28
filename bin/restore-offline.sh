@@ -27,11 +27,12 @@ if [ -f "$SRC/docker-images.tar.gz" ]; then
   gunzip -c "$SRC/docker-images.tar.gz" | docker load
 else warn "1/5 no docker-images.tar.gz in bundle — skipping"; fi
 
-# 2. HF model cache
+# 2. HF model cache (contains root-owned files from the vLLM container — extract with
+# sudo so the original ownership is preserved; the container reads them as root).
 if [ -f "$SRC/hf-cache.tar" ]; then
   say "2/5 restoring HuggingFace model cache -> ~/.cache/huggingface"
   mkdir -p "$HOME/.cache"
-  tar -C "$HOME" -xf "$SRC/hf-cache.tar"
+  sudo tar -C "$HOME" -xf "$SRC/hf-cache.tar" || tar -C "$HOME" -xf "$SRC/hf-cache.tar"
 else warn "2/5 no hf-cache.tar (models may need to come from the other node or a download)"; fi
 
 # 3. Repo + .venv  (restore next to $HOME unless already present)

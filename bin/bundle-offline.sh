@@ -64,7 +64,16 @@ fi
 # 2. HF model cache (the big one — only on nodes that pulled weights)
 if [ "$SKIP_MODELS" = 0 ] && [ -d "$HOME/.cache/huggingface" ]; then
   say "2/6 HuggingFace model cache (~/.cache/huggingface — can be ~160GB)"
-  tar -C "$HOME" -cf "$OUT/hf-cache.tar" .cache/huggingface
+  # vLLM downloads weights AS ROOT inside the container, so some files are root-owned
+  # and unreadable to $USER. Use sudo for the tar, then hand the result back to $USER.
+  if tar -C "$HOME" -cf "$OUT/hf-cache.tar" .cache/huggingface 2>/dev/null; then
+    :  # user could read everything (rare)
+  else
+    warn "  some weights are root-owned (downloaded by the vLLM container) — using sudo"
+    sudo tar -C "$HOME" -cf "$OUT/hf-cache.tar" .cache/huggingface \
+      || die "sudo tar of the model cache failed"
+    sudo chown "$USER:$USER" "$OUT/hf-cache.tar"
+  fi
 else
   warn "2/6 skipping model cache (--no-models or none present)"
 fi
