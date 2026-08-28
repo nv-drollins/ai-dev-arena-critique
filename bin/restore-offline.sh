@@ -3,7 +3,7 @@
 # internet. Run on the matching node (head bundle -> head node, worker -> worker),
 # after the one-time Docker prerequisite (group + nvidia runtime, then re-login).
 #
-#   bash bin/restore-offline.sh /media/nvidia/USB/arena-offline-<node>
+#   bash bin/restore-offline.sh /media/nvidia/USB/arena-offline-<role>-<node>
 #
 # It loads the Docker images, unpacks the HF model cache, the repo+.venv, Hermes,
 # and the staged ~/ scripts — everything the launchers need, no download required.
@@ -15,7 +15,7 @@ warn() { printf '%s!%s %s\n' "$Y" "$Z" "$*" >&2; }
 die()  { printf '%s✗%s %s\n' "$Rr" "$Z" "$*" >&2; exit 1; }
 
 SRC="${1:-}"
-[ -n "$SRC" ] && [ -d "$SRC" ] || die "usage: bash bin/restore-offline.sh <bundle-dir>  (e.g. /media/$USER/arena-offline-<node>)"
+[ -n "$SRC" ] && [ -d "$SRC" ] || die "usage: bash bin/restore-offline.sh <bundle-dir>  (e.g. /media/$USER/arena-offline-<role>-<node>)"
 
 # prereq sanity (same as the installers require)
 command -v docker >/dev/null 2>&1 || die "Docker not installed."

@@ -44,9 +44,29 @@ if [ -n "$avail_gb" ] && [ "$avail_gb" -lt 200 ]; then
   warn "pass a USB path instead: bash bin/bundle-offline.sh /media/$USER/<vendor>"
 fi
 node="$(hostname)"
-OUT="$DEST/arena-offline-$node"
+
+# --- detect role: head vs worker ---------------------------------------------
+# Signals, most reliable first:
+#   • the writer container (arena-writer) runs on the WORKER
+#   • the writer model weights present but no Hermes -> WORKER
+#   • Hermes installed (~/.hermes) -> HEAD (install-head sets it up)
+#   • else match hostname against SPARK_HEAD / SPARK_WORKERS in arena.conf
+detect_role() {
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^arena-writer$'; then echo worker; return; fi
+  if ls "$HOME"/.cache/huggingface/hub/*Nemotron*Lightning* >/dev/null 2>&1 \
+     && [ ! -d "$HOME/.hermes" ]; then echo worker; return; fi
+  if [ -d "$HOME/.hermes" ]; then echo head; return; fi
+  # hostname match against arena.conf rosters (e.g. SPARK_HEAD="sp6b64=nvidia@...")
+  case " ${SPARK_HEAD:-} "    in *"$node"*) echo head;   return;; esac
+  case " ${SPARK_WORKERS:-} " in *"$node"*) echo worker; return;; esac
+  echo unknown
+}
+ROLE="${ROLE:-$(detect_role)}"   # allow manual override: ROLE=head bash bin/bundle-offline.sh
+[ "$ROLE" = unknown ] && warn "could not auto-detect role for '$node' — folder will say 'unknown' (override: ROLE=head|worker bash bin/bundle-offline.sh)"
+
+OUT="$DEST/arena-offline-$ROLE-$node"
 mkdir -p "$OUT"
-say "bundling node '$node' -> $OUT"
+say "bundling node '$node' (role: $ROLE) -> $OUT"
 say "(copy this folder to your USB drive afterward)"
 
 # 1. Docker images (both writer + Ray/critic images if present)
@@ -120,4 +140,4 @@ echo "e.g. /media/$USER/<vendor>/ — copy it wherever your USB mounts):"
 echo "    $OUT"
 echo
 echo "At the event, on the matching freshly-imaged node, from the USB:"
-echo "    bash <repo>/bin/restore-offline.sh /media/$USER/<vendor>/arena-offline-$node"
+echo "    bash <repo>/bin/restore-offline.sh /media/$USER/<vendor>/arena-offline-$ROLE-$node"
