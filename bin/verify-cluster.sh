@@ -62,6 +62,19 @@ else
           "$SYS_PY -m pip install --user --break-system-packages pytest flask"
 fi
 
+# 4b. Hermes agent venv (agentic mode spawns hermes; a broken venv python = the agent
+# does 0 tool actions and never touches the writer — the exact silent failure we hit
+# on an offline restore where ~/.local/share/uv wasn't captured).
+VPY="$HOME/.hermes/hermes-agent/venv/bin/python"
+if [ -x "$HOME/.hermes" ] || [ -d "$HOME/.hermes/hermes-agent" ]; then
+  if "$VPY" -c "import hermes_cli" >/dev/null 2>&1; then
+    say_ok "Hermes agent venv OK ($("$VPY" --version 2>&1))"
+  else
+    say_bad "Hermes venv python broken — agentic runs do 0 tool actions (never reach the model)" \
+            "restore ~/.local/share/uv, or: PATH=\$HOME/.hermes/bin:\$PATH uv python install 3.11"
+  fi
+fi
+
 # 5. Orchestrator up + wired
 cfg=$(curl -s -m4 "http://localhost:${ORCH_PORT}/api/config" 2>/dev/null)
 if [ -z "$cfg" ]; then

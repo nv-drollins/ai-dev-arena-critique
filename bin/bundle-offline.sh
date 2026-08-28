@@ -130,6 +130,20 @@ if [ -d "$HOME/.hermes" ]; then
     say "4/6 Hermes install (~/.hermes)"
     tar -C "$HOME" -cf - .hermes | $GZ > "$OUT/hermes.tar.gz"
   fi
+  # CRITICAL: Hermes's venv (~/.hermes/hermes-agent/venv/bin/python) is a symlink into
+  # ~/.local/share/uv/python/... (a uv-managed Python). Without this dir the symlink is
+  # DEAD after restore → Hermes can't launch → agent does 0 tool actions → never touches
+  # the model. Capture the uv Python + tools too.
+  if [ -d "$HOME/.local/share/uv" ]; then
+    if [ -s "$OUT/uv-python.tar.gz" ]; then
+      say "  uv python/tools: already bundled — skipping"
+    else
+      say "  bundling uv-managed Python + tools (~/.local/share/uv — needed by Hermes venv)"
+      tar -C "$HOME" -cf - .local/share/uv | $GZ > "$OUT/uv-python.tar.gz"
+    fi
+  else
+    warn "  ~/.local/share/uv not found — Hermes venv may break on restore (agentic mode)"
+  fi
 fi
 
 # 5. Staged cluster scripts + parser in ~/

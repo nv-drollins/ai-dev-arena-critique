@@ -45,6 +45,28 @@ else warn "3/5 no repo.tar.gz — clone the repo manually (needs internet)"; fi
 if [ -f "$SRC/hermes.tar.gz" ]; then
   say "4/5 restoring Hermes (~/.hermes)"
   tar -C "$HOME" -xzf "$SRC/hermes.tar.gz"
+  # Hermes's venv python is a symlink into ~/.local/share/uv — restore that too, or
+  # the agent can't launch (0 tool actions, never touches the model).
+  if [ -f "$SRC/uv-python.tar.gz" ]; then
+    say "  restoring uv-managed Python + tools (~/.local/share/uv)"
+    mkdir -p "$HOME/.local/share"
+    tar -C "$HOME" -xzf "$SRC/uv-python.tar.gz"
+  fi
+  # Verify the venv python actually resolves; self-heal if it doesn't.
+  VPY="$HOME/.hermes/hermes-agent/venv/bin/python"
+  if "$VPY" --version >/dev/null 2>&1; then
+    say "  Hermes venv python OK ($("$VPY" --version 2>&1))"
+  else
+    warn "  Hermes venv python is broken (symlink target missing)."
+    if [ -x "$HOME/.hermes/bin/uv" ]; then
+      pyver="$(grep -oE 'version_info = [0-9.]+' "$HOME/.hermes/hermes-agent/venv/pyvenv.cfg" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+      warn "  attempting to rebuild it with uv (needs internet): uv python install ${pyver:-3.11}"
+      PATH="$HOME/.hermes/bin:$PATH" uv python install "${pyver:-3.11}" 2>/dev/null \
+        && ( "$VPY" --version >/dev/null 2>&1 && say "  venv python rebuilt OK" \
+             || warn "  still broken — agentic mode won't work until Hermes is reinstalled" ) \
+        || warn "  no internet to rebuild — reinstall Hermes on-site for agentic mode"
+    fi
+  fi
 else warn "4/5 no hermes.tar.gz (head-node bundle only — fine on the worker)"; fi
 
 # 5. Staged ~/ scripts
