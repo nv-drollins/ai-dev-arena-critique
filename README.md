@@ -231,6 +231,82 @@ writer/critic env wired in.
 
 ---
 
+## Offline / air-gapped deployment (for events with no internet)
+
+Take the whole thing to a venue with no/poor internet: **capture** everything on a
+node with internet, copy it to a USB drive, then **restore** it onto a freshly-imaged
+node on-site — no downloads required. Do this per node (head and worker).
+
+### A. Capture (do this ahead of time, WITH internet)
+
+On a fully working cluster (both models pulled, everything running), run on **each**
+Spark:
+
+```bash
+cd ~/ai-dev-arena
+bash bin/bundle-offline.sh
+```
+
+- Auto-detects the node's role and writes to `offline/arena-offline-<role>-<node>/`
+  inside the repo (e.g. `arena-offline-worker-spark-ce66`). Override with
+  `ROLE=head|worker bash bin/bundle-offline.sh` if needed.
+- Captures: both vLLM Docker images, the HuggingFace model cache (~160GB on the
+  node that pulled it), the repo + `.venv`, Hermes (`~/.hermes`), staged `~/` cluster
+  scripts, and `pytest`/`flask` wheels for the challenge grader.
+- Uses `sudo` for the model cache (vLLM downloads weights as root) and `pigz` for
+  fast parallel compression. **It's resumable** — re-running skips any step whose
+  output already exists (delete a specific `.tar`/`.tar.gz` in the output folder to
+  redo just that one).
+- **Then copy the `offline/arena-offline-<role>-<node>/` folder to your USB drive.**
+  It's large (150–350GB per node) — use a fast USB3/NVMe drive and expect it to take
+  a while.
+
+### B. Restore (at the event, on the freshly-imaged node, NO internet)
+
+Per node, in order:
+
+1. **One-time Docker prerequisite** (same as a normal install), then log out/in:
+   ```bash
+   sudo usermod -aG docker $USER
+   sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker
+   # log out and back in
+   ```
+2. **Restore the matching bundle** from the USB (head bundle → head node, worker →
+   worker). The restore script only needs the repo, so get it from the bundle's own
+   `repo.tar.gz` first, or clone if you have a moment of connectivity:
+   ```bash
+   # unpack just the repo from the bundle so you have the scripts:
+   tar -C ~ -xzf /media/$USER/<vendor>/arena-offline-<role>-<node>/repo.tar.gz
+   cd ~/ai-dev-arena
+   bash bin/restore-offline.sh /media/$USER/<vendor>/arena-offline-<role>-<node>
+   ```
+   This loads the Docker images, unpacks the model cache (with `sudo`), the repo +
+   `.venv`, Hermes, and the staged scripts, and installs the grader wheels offline.
+
+3. **Bring up the cluster and models** — same order as a normal install, but nothing
+   downloads:
+   ```bash
+   # HEAD first (Ray head), then WORKER joins:
+   #   head:   bash ~/start-ray-head.sh     (or via bin/start.sh)
+   #   worker: bash ~/start-ray-worker.sh
+   # then:
+   bash bin/verify-cluster.sh        # confirm 2 GPUs before launching the critic
+   bash bin/launch-writer.sh         # on the WORKER
+   tmux new -s critic 'bash bin/launch-critic.sh'   # on the HEAD (loads from cache, no download)
+   bash bin/restart-orch.sh          # on the HEAD
+   bash bin/verify-cluster.sh        # all ✓ = demo ready
+   ```
+
+**Tips:**
+- The **model weights live on whichever node pulled them** — the worker bundle has
+  the writer (~21GB), the head bundle has the critic (~141GB). Restore each on its
+  matching node.
+- On restore, the models load from `~/.cache/huggingface` — you'll see the launchers
+  come up **without** the long download, straight to loading + serving.
+- If `verify-cluster.sh` shows anything but all ✓, it prints the exact fix for each ✗.
+
+---
+
 ## Using it
 
 **Operator console** (`/operator`):
