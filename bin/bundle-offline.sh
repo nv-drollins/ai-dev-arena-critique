@@ -68,6 +68,9 @@ OUT="$DEST/arena-offline-$ROLE-$node"
 mkdir -p "$OUT"
 say "bundling node '$node' (role: $ROLE) -> $OUT"
 say "(copy this folder to your USB drive afterward)"
+# Use pigz (parallel gzip) if available — many times faster on the GB10's cores.
+if command -v pigz >/dev/null 2>&1; then GZ="pigz"; else GZ="gzip -1"; fi
+say "compressor: $GZ"
 
 # 1. Docker images (both writer + Ray/critic images if present)
 say "1/6 docker images (this is slow — ~40GB)"
@@ -76,36 +79,57 @@ for img in "${WRITER_IMAGE:-vllm/vllm-openai:v0.27.1}" "${VLLM_IMAGE:-nvcr.io/nv
   docker image inspect "$img" >/dev/null 2>&1 && imgs+=("$img") || warn "image $img not present on this node — skipping"
 done
 if [ "${#imgs[@]}" -gt 0 ]; then
-  docker save "${imgs[@]}" | pv 2>/dev/null | gzip -1 > "$OUT/docker-images.tar.gz" 2>/dev/null \
-    || docker save "${imgs[@]}" | gzip -1 > "$OUT/docker-images.tar.gz"
-  printf '%s\n' "${imgs[@]}" > "$OUT/docker-images.list"
+  if [ -s "$OUT/docker-images.tar.gz" ]; then
+    say "  docker-images.tar.gz already exists — skipping (delete it to redo)"
+  else
+    docker save "${imgs[@]}" | $GZ > "$OUT/docker-images.tar.gz"
+    printf '%s\n' "${imgs[@]}" > "$OUT/docker-images.list"
+  fi
 fi
 
-# 2. HF model cache (the big one — only on nodes that pulled weights)
+# 2. HF model cache (the big one — only on nodes that pulled weights). Stored
+# UNCOMPRESSED (weights are already compressed — gzip wastes CPU for ~0 gain).
 if [ "$SKIP_MODELS" = 0 ] && [ -d "$HOME/.cache/huggingface" ]; then
-  say "2/6 HuggingFace model cache (~/.cache/huggingface — can be ~160GB)"
-  # vLLM downloads weights AS ROOT inside the container, so some files are root-owned
-  # and unreadable to $USER. Use sudo for the tar, then hand the result back to $USER.
-  if tar -C "$HOME" -cf "$OUT/hf-cache.tar" .cache/huggingface 2>/dev/null; then
-    :  # user could read everything (rare)
+  if [ -s "$OUT/hf-cache.tar" ]; then
+    say "2/6 model cache: hf-cache.tar already exists — skipping (delete it to redo)"
   else
-    warn "  some weights are root-owned (downloaded by the vLLM container) — using sudo"
-    sudo tar -C "$HOME" -cf "$OUT/hf-cache.tar" .cache/huggingface \
-      || die "sudo tar of the model cache failed"
-    sudo chown "$USER:$USER" "$OUT/hf-cache.tar"
+    say "2/6 HuggingFace model cache (~/.cache/huggingface — can be ~160GB, slow)"
+    # vLLM downloads weights AS ROOT inside the container, so some files are root-owned
+    # and unreadable to $USER. Use sudo for the tar, then hand the result back to $USER.
+    if tar -C "$HOME" -cf "$OUT/hf-cache.tar" .cache/huggingface 2>/dev/null; then
+      :  # user could read everything (rare)
+    else
+      warn "  some weights are root-owned (downloaded by the vLLM container) — using sudo"
+      sudo tar -C "$HOME" -cf "$OUT/hf-cache.tar" .cache/huggingface \
+        || die "sudo tar of the model cache failed"
+      sudo chown "$USER:$USER" "$OUT/hf-cache.tar"
+    fi
   fi
 else
   warn "2/6 skipping model cache (--no-models or none present)"
 fi
 
-# 3. The repo working tree, incl .venv (so no pip install needed offline)
-say "3/6 repo + .venv"
-tar -C "$(dirname "$REPO")" -czf "$OUT/repo.tar.gz" "$(basename "$REPO")"
+# 3. The repo working tree, incl .venv (so no pip install needed offline).
+# EXCLUDE the offline/ output dir — otherwise tar reads the bundle it's writing into
+# ("file changed as we read it") and balloons the archive by ~200GB. Also skip .git.
+if [ -s "$OUT/repo.tar.gz" ]; then
+  say "3/6 repo: repo.tar.gz already exists — skipping (delete it to redo)"
+else
+  say "3/6 repo + .venv"
+  tar -C "$(dirname "$REPO")" \
+    --exclude="$(basename "$REPO")/offline" \
+    --exclude="$(basename "$REPO")/.git" \
+    -cf - "$(basename "$REPO")" | $GZ > "$OUT/repo.tar.gz"
+fi
 
 # 4. Hermes install (head node)
 if [ -d "$HOME/.hermes" ]; then
-  say "4/6 Hermes install (~/.hermes)"
-  tar -C "$HOME" -czf "$OUT/hermes.tar.gz" .hermes
+  if [ -s "$OUT/hermes.tar.gz" ]; then
+    say "4/6 Hermes: hermes.tar.gz already exists — skipping"
+  else
+    say "4/6 Hermes install (~/.hermes)"
+    tar -C "$HOME" -cf - .hermes | $GZ > "$OUT/hermes.tar.gz"
+  fi
 fi
 
 # 5. Staged cluster scripts + parser in ~/
