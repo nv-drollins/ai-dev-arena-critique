@@ -284,17 +284,33 @@ Per node, in order:
    `.venv`, Hermes, and the staged scripts, and installs the grader wheels offline.
 
 3. **Bring up the cluster and models** — same order as a normal install, but nothing
-   downloads:
+   downloads. Run these in order, on the node indicated. **The Ray scripts run in the
+   foreground and hold the terminal, so start them in `tmux`** (don't Ctrl-C them —
+   that kills the cluster):
+
+   **On the HEAD** — start Ray head:
    ```bash
-   # HEAD first (Ray head), then WORKER joins:
-   #   head:   bash ~/start-ray-head.sh     (or via bin/start.sh)
-   #   worker: bash ~/start-ray-worker.sh
-   # then:
-   bash bin/verify-cluster.sh        # confirm 2 GPUs before launching the critic
-   bash bin/launch-writer.sh         # on the WORKER
-   tmux new -s critic 'bash bin/launch-critic.sh'   # on the HEAD (loads from cache, no download)
-   bash bin/restart-orch.sh          # on the HEAD
-   bash bin/verify-cluster.sh        # all ✓ = demo ready
+   tmux new -d -s ray-head 'bash ~/start-ray-head.sh'
+   ```
+   **On the WORKER** — join Ray to the head:
+   ```bash
+   tmux new -d -s ray-worker 'bash ~/start-ray-worker.sh'
+   ```
+   **On the HEAD** — confirm the cluster formed (must show `/2.0 GPU`), then launch:
+   ```bash
+   cd ~/ai-dev-arena
+   bash bin/verify-cluster.sh                          # confirm 2 GPUs BEFORE the critic
+   ```
+   **On the WORKER** — start the writer:
+   ```bash
+   cd ~/ai-dev-arena && bash bin/launch-writer.sh      # loads from cache, no download
+   ```
+   **On the HEAD** — start the critic (in tmux) + orchestrator, then verify:
+   ```bash
+   cd ~/ai-dev-arena
+   tmux new -s critic 'bash bin/launch-critic.sh'      # loads from cache; Ctrl-b then d to detach
+   bash bin/restart-orch.sh
+   bash bin/verify-cluster.sh                          # all ✓ (incl. Hermes venv) = demo ready
    ```
 
 **Tips:**
