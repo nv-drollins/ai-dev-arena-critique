@@ -284,9 +284,11 @@ Per node, in order:
    `.venv`, Hermes, and the staged scripts, and installs the grader wheels offline.
 
 3. **Bring up the cluster and models** — same order as a normal install, but nothing
-   downloads. Run these in order, on the node indicated. **The Ray scripts run in the
-   foreground and hold the terminal, so start them in `tmux`** (don't Ctrl-C them —
-   that kills the cluster):
+   downloads. Run these in order, on the node indicated. The Ray scripts hold their
+   terminal (Ray runs in the foreground and its container dies if the script exits),
+   so we start them **detached in `tmux`** — the `tmux new -d` returns you to your
+   prompt immediately while Ray keeps running in the background session. (Don't
+   `tmux kill-session` or Ctrl-C those sessions — that stops the cluster.)
 
    **On the HEAD** — start Ray head:
    ```bash
