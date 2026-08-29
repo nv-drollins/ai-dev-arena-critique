@@ -69,6 +69,10 @@ mkdir -p "$OUT"
 say "bundling node '$node' (role: $ROLE) -> $OUT"
 say "(copy this folder to your USB drive afterward)"
 # Use pigz (parallel gzip) if available — many times faster on the GB10's cores.
+# (Model weights are stored UNCOMPRESSED in step 2 — they're already compressed and
+# I/O-bound — so the compressor only affects the images/repo/hermes tars. zstd would be
+# marginally faster but changing the output format risks a bundle/restore mismatch, so
+# we stay on gzip-format .tar.gz which restore reads with plain tar -xzf.)
 if command -v pigz >/dev/null 2>&1; then GZ="pigz"; else GZ="gzip -1"; fi
 say "compressor: $GZ"
 
