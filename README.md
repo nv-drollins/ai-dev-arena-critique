@@ -360,6 +360,7 @@ says `needs-work`. Use **Replay** on D if you need a guaranteed clean walkthroug
 
 ## Docs
 
+- **[Demo script: walkthrough for presenting to attendees](docs/DEMO_SCRIPT.md)**
 - **[Concepts: modes · challenges · scoring](docs/CONCEPTS.md)**
 - **[Scoring: the 6 categories and the math](docs/SCORING.md)**
 - **[Architecture: two Sparks, the agentic flow](docs/ARCHITECTURE.md)**
