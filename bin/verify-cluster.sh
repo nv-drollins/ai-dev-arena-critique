@@ -90,6 +90,17 @@ else
   fi
 fi
 
+# Display pages: a stale-session regression here is invisible to every check
+# above (models serve, orchestrator answers) but shows the WRONG run to the
+# audience. Cheap to verify, expensive to discover live.
+if [ -x "$HERE/verify-frontend.sh" ]; then
+  if bash "$HERE/verify-frontend.sh" >/dev/null 2>&1; then
+    say_ok "Display pages will follow the current run"
+  else
+    say_bad "Display pages may show a STALE run" "bash bin/verify-frontend.sh"
+  fi
+fi
+
 echo "─────────────────────────────────"
 if [ "$fail" -eq 0 ]; then
   printf '%s✓ ALL %d CHECKS PASS — demo ready%s\n' "$G" "$pass" "$Z"

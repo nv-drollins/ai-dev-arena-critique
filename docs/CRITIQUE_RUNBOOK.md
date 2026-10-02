@@ -32,6 +32,7 @@ bash bin/sparkctl.sh status       # confirm 2 nodes, 2 GPUs
 # 2. bring up BOTH engines (writer ~1min, critic ~2-5min to load 70B across TP=2)
 bash bin/critiquectl.sh start     # writer + critic + orchestrator(critic-enabled)
 bash bin/critiquectl.sh status    # confirm writer :8001 + critic :8002 both serving
+bash bin/verify-cluster.sh        # 7 checks incl. the display pages — run ON the head
 
 # 3. open the displays
 #    Operator: http://<head>:8080/operator
@@ -62,6 +63,7 @@ bash bin/critiquectl.sh status    # confirm writer :8001 + critic :8002 both ser
 
 | Symptom | Fix |
 |---|---|
+| **Display shows the PREVIOUS run's challenge/score** | `bash bin/verify-frontend.sh` — a display page that latched onto an old session. Reload the page; if the check fails, the stale-session regression is back in `frontend/`. |
 | Critic won't come up / OOM | See "Two engines, shared GPUs" below — likely fell into the Option-B case |
 | Critic slow to first token | Normal for 70B; the live stream shows it's alive. Talk over it. |
 | Whole thing wedged | `bin/critiquectl.sh restart both` (clean stop + relaunch) |
