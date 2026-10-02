@@ -128,11 +128,13 @@ _stop_writer() {  # writer is its OWN container (arena-writer) on WRITER_HOST_SP
 _start_orch() {
   c "starting orchestrator with CRITIC_ENABLED=1 (writer→critic pipeline)…"
   on_head "cd $ARENA_DIR && bash bin/restart-orch.sh" >/dev/null 2>&1
-  # confirm the roster actually made it through
+  # Confirm the roster actually made it through. Count SPARKS, not '"role"' keys
+  # -- gpu_procs entries carry a "role" too, so grepping that over-counts and the
+  # guard would stay silent on a single-node roster with several GPU processes.
   local n
   n=$(on_head "curl -s -m6 http://localhost:$ORCH_PORT/api/telemetry" 2>/dev/null \
-      | grep -o '\"role\"' | wc -l)
-  if [ "${n:-0}" -ge 2 ]; then
+      | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("sparks",[])))' 2>/dev/null)
+  if [ "${n:-0}" -ge 2 ] 2>/dev/null; then
     ok "orchestrator up (critic enabled, $n nodes in cluster panel)"
   else
     warn "orchestrator up but telemetry shows ${n:-0} node(s) — the cluster panel"
