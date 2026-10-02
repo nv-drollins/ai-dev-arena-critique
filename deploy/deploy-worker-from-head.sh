@@ -8,11 +8,11 @@
 #
 # Usage (from the head):
 #   bash deploy/deploy-worker-from-head.sh
-#   WORKER_TARGET=nvidia@192.168.1.149 bash deploy/deploy-worker-from-head.sh
+#   WORKER_TARGET=nvidia@<worker-host> bash deploy/deploy-worker-from-head.sh
 #   BRANCH=main bash deploy/deploy-worker-from-head.sh
 #
 # Env vars (all have sensible defaults for your two-Spark arena):
-#   WORKER_TARGET   nvidia@192.168.1.149
+#   WORKER_TARGET   nvidia@<worker-host>  (default: first worker in SPARK_WORKERS)
 #   BRANCH          (current branch of this repo, or "main")
 #   FAST_IFNAME     enp1s0f1np1   (the 100GbE link; informational only)
 #   RERUN_DOCKER    1             # set 0 to skip docker restart
@@ -20,7 +20,12 @@
 # =============================================================================
 set -euo pipefail
 
-WORKER_TARGET="${WORKER_TARGET:-nvidia@192.168.1.149}"
+# Default the worker from bin/arena.conf's roster (no hardcoded addresses).
+if [ -z "${WORKER_TARGET:-}" ]; then
+  _w="${SPARK_WORKERS%% *}"          # name=user@host
+  WORKER_TARGET="${_w##*=}"          # user@host
+fi
+[ -n "$WORKER_TARGET" ] || { err "WORKER_TARGET not set and SPARK_WORKERS is empty (see bin/arena.conf.local)"; exit 1; }
 BRANCH="${BRANCH:-$(git -C "$(dirname "$0")/../" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)}"
 FAST_IFNAME="${FAST_IFNAME:-enp1s0f1np1}"
 RERUN_DOCKER="${RERUN_DOCKER:-1}"

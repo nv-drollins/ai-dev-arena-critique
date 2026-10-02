@@ -8,7 +8,7 @@
 # Requires:
 #   - Python 3.11+
 #   - Docker installed and `nvidia @ docker` working
-#   - Reachable worker on 192.168.100.11 (100GbE link)
+#   - Reachable worker on the fast link (see CLUSTER_SUBNET in bin/arena.conf)
 #   - Model weights already in ~/.cache/huggingface (not downloaded here —
 #     they are ~200 GB)
 # -----------------------------------------------------------------------------
@@ -93,7 +93,9 @@ else
 fi
 
 step "✅ done — open:"
-echo "  Operator:  http://192.168.1.159:8080/operator"
-echo "  Arena:     http://192.168.1.159:8080/arena"
-echo "  Theater:   http://192.168.1.159:8080/theater"
+# Report the URL by this node's own primary address, whatever it is.
+_self="$(hostname -I 2>/dev/null | awk '{print $1}')"; _self="${_self:-localhost}"
+echo "  Operator:  http://${_self}:${ORCH_PORT:-8080}/operator"
+echo "  Arena:     http://${_self}:${ORCH_PORT:-8080}/arena"
+echo "  Theater:   http://${_self}:${ORCH_PORT:-8080}/theater"
 echo "  CLI:       python3 scripts/run_demo.py status"

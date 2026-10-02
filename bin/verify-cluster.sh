@@ -19,7 +19,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 WRITER_PORT="${WRITER_PORT:-8001}"
 CRITIC_PORT="${CRITIC_PORT:-8002}"
 ORCH_PORT="${ORCH_PORT:-8080}"
-WRITER_HOST_SPARK="${WRITER_HOST_SPARK:-192.168.1.149}"
+arena_require_roster || exit 1
 
 if [ -t 1 ]; then G=$'\033[1;32m'; R=$'\033[1;31m'; Y=$'\033[1;33m'; Z=$'\033[0m'; else G= R= Y= Z=; fi
 pass=0; fail=0

@@ -8,7 +8,7 @@
 
 | Item | Result |
 |---|---|
-| **Critic loads TP=2 across both Sparks** | ✅ `llama33-nemotron-70b-feedback` serving on :8002; Ray worker rank connected from 192.168.100.11 over the 100GbE link |
+| **Critic loads TP=2 across both Sparks** | ✅ `llama33-nemotron-70b-feedback` serving on :8002; Ray worker rank connected over the 100GbE link |
 | **Critic produces usable reviews** | ✅ verdict `ship-with-nits` + 2 real findings (missing input validation, clarity) that the tests don't catch + a concrete better-way. Clean JSON (fenced). |
 | **Critic review latency** | ⏱ ~80s for a full review (max_tokens=600). In the 60–120s budget; streamed so it never looks frozen. Tune down via `max_tokens` for a punchier stage pace. |
 | **Critic arch/parser** | ✅ plain `LlamaForCausalLM`, BF16, no reasoning parser needed |

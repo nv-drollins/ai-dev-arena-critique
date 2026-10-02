@@ -17,7 +17,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/arena.conf"
 
 SSH=(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 -o BatchMode=yes)
-HEAD_SSH="${SPARK_HEAD##*=}"           # nvidia@192.168.1.159
+HEAD_SSH="${SPARK_HEAD##*=}"           # user@host, from bin/arena.conf
 WRITER_SSH="nvidia@${WRITER_HOST_SPARK}"
 
 on_head()   { "${SSH[@]}" "$HEAD_SSH" "$@"; }

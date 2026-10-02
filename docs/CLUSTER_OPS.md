@@ -37,7 +37,7 @@ The whole control surface lives in **`bin/`**:
 
 Verify passwordless SSH from the head first:
 ```
-ssh nvidia@192.168.1.149 'echo ok'     # → ok, no password prompt
+ssh nvidia@<worker-host> 'echo ok'     # → ok, no password prompt
 ```
 
 ### 1.2 Node software (both head and worker)
@@ -109,7 +109,7 @@ re-run.
 bash bin/install-head.sh
 
 # WORKER (Spark #2) — run on that machine, or from the head:
-ssh nvidia@192.168.1.149 'bash ~/ai-dev-arena/bin/install-worker.sh'
+ssh nvidia@<worker-host> 'bash ~/ai-dev-arena/bin/install-worker.sh'
 ```
 
 ### What `install-head.sh` does (in order)

@@ -74,7 +74,7 @@ bash deploy/deploy-worker-from-head.sh
 ```
 
 `deploy-worker-from-head.sh` does:
-1. Reads `WORKER_TARGET` (default: `nvidia@192.168.1.149`) and `REPO_BRANCH`
+1. Reads `WORKER_TARGET` (default: the first entry in `SPARK_WORKERS` from `bin/arena.conf`) and `REPO_BRANCH`
    (default: current branch).
 2. On the worker, `git fetch && git reset --hard origin/<REPO_BRANCH>` (or
    `git submodule update` if you add any).

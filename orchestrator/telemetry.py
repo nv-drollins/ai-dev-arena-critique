@@ -16,13 +16,18 @@ import os
 import subprocess
 
 # --- Node roster -------------------------------------------------------------
-# Default: the two stacked Sparks. To scale to 3-4 nodes, set SPARK_NODES_JSON
-# e.g.  export SPARK_NODES_JSON='{"sparks":[{"name":"spark-a","host":"localhost"},
-#                                          {"name":"spark-b","host":"192.168.1.149"},
-#                                          {"name":"spark-c","host":"192.168.1.150"}]}'
+# Nodes come from the environment -- the orchestrator is started by
+# bin/restart-orch.sh / bin/critiquectl.sh, which export SPARK_NODES_JSON
+# built from bin/arena.conf's SPARK_HEAD + SPARK_WORKERS.
+#
+# Format (either shape works):
+#   SPARK_NODES_JSON='{"sparks":[{"name":"spark-a","host":"localhost","role":"head"},
+#                                {"name":"spark-b","host":"192.0.2.11","role":"worker"}]}'
+#
+# No IPs are hardcoded here. If nothing is set we report ONLY the local node,
+# which always works and never points at hardware that isn't yours.
 _DEFAULT_SPARKS = [
-    {"name": "spark-6b64", "host": "localhost", "role": "head"},
-    {"name": "spark-ce66", "host": "192.168.1.149", "role": "worker"},
+    {"name": os.environ.get("SPARK_LOCAL_NAME", "head"), "host": "localhost", "role": "head"},
 ]
 
 def _env_sparks():

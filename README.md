@@ -99,8 +99,8 @@ cd ai-dev-arena
 # it's gitignored). Put ONLY the vars you're changing in it, e.g. node IPs and your
 # HF token. Example (adjust to your cluster):
 #   cat > bin/arena.conf.local <<'EOF'
-#   HEAD_NODE_IP="192.168.1.159"
-#   WRITER_HOST_SPARK="192.168.1.149"
+#   SPARK_HEAD="head=nvidia@<head-host>"
+#   SPARK_WORKERS="w1=nvidia@<worker-host>"
 #   HF_TOKEN="hf_your_token_here"
 #   EOF
 # It's sourced last: arena.conf.local > env > arena.conf defaults.

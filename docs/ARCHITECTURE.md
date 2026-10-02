@@ -67,7 +67,7 @@
 ## Real-time cluster gauges — how it works
 `orchestrator/telemetry.py::collect_telemetry()`:
 1. Polls HEAD directly (local process calls).
-2. Polls every node in `SPARK_NODES` (currently node2/192.168.1.149) over local-SSH (passwordless). Each node's probe is a 1-second `bash -c` that runs:
+2. Polls every node in `SPARK_NODES` (built from `SPARK_HEAD`/`SPARK_WORKERS` in `bin/arena.conf`) over local-SSH (passwordless). Each node's probe is a 1-second `bash -c` that runs:
    - `nvidia-smi dmon -s u -c 2 --format=csv,noheader` → `sm` column = **GPU compute utilization** (this is the *real* metric on GB10 — the classic `utilization.gpu` query is unreliable there when a big MoE decode happens in short bursts).
    - `cat /proc/stat` → CPU utilization (sampled twice)
    - `cat /proc/meminfo` → memory used/total

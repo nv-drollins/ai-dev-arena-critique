@@ -110,7 +110,7 @@ step "3. start Ray WORKER"
 # running install-head + install-worker in PARALLEL races: the worker tries to
 # connect before the head's Ray is up, the join silently fails, and Ray ends up
 # seeing only 1 GPU (the 70B critic then hangs forever). Poll up to ~4 min.
-HEAD_RAY_IP="${HEAD_NODE_IP:-192.168.100.10}"
+HEAD_RAY_IP="$HEAD_NODE_IP"
 printf '  waiting for head Ray at %s:6379 ' "$HEAD_RAY_IP"
 ray_ready=0
 for _ in $(seq 1 48); do

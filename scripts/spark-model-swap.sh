@@ -21,8 +21,12 @@
 # ============================================================================
 set -uo pipefail
 
-NODE1="nvidia@192.168.1.159"       # head / orchestrator / vLLM serve
-NODE2="nvidia@192.168.1.149"       # worker
+# Node addresses come from bin/arena.conf (override in bin/arena.conf.local).
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../bin/arena.conf"
+arena_require_roster || exit 1
+NODE1="${SPARK_HEAD##*=}"                      # head / orchestrator / vLLM serve
+_w="${SPARK_WORKERS%% *}"; NODE2="${_w##*=}"   # first worker
 SSH=(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=6 -o BatchMode=yes)
 
 # model -> launcher (on node1 home) and the served name the orchestrator uses

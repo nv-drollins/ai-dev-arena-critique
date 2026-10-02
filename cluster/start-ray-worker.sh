@@ -1,12 +1,34 @@
 #!/usr/bin/env bash
+# Join this node to the Ray cluster as a WORKER, inside the vLLM container.
+#
+# All addressing comes from bin/arena.conf (which auto-detects this node's
+# fast-link IP from $MN_IF_NAME and derives the head's from CLUSTER_SUBNET).
+# Override via env or bin/arena.conf.local -- do NOT hardcode addresses here.
 set -euo pipefail
-export MN_IF_NAME=enp1s0f1np1
-export VLLM_HOST_IP=192.168.100.11
-export HEAD_NODE_IP=192.168.100.10
-export VLLM_IMAGE=nvcr.io/nvidia/vllm:26.05-py3
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SPARK_ROLE=worker
+# shellcheck source=../bin/arena.conf
+. "$HERE/../bin/arena.conf"
+
+if [ -z "${VLLM_HOST_IP:-}" ]; then
+  err "Could not determine this node's address on the fast link."
+  err "  interface tried: $MN_IF_NAME"
+  err "  fix: bring the link up, or set VLLM_HOST_IP / MN_IF_NAME in bin/arena.conf.local"
+  exit 1
+fi
+
+if [ "$VLLM_HOST_IP" = "$HEAD_NODE_IP" ]; then
+  err "This node's fast-link IP ($VLLM_HOST_IP) equals the head's ($HEAD_NODE_IP)."
+  err "Either this script is running on the head, or the link is misconfigured."
+  exit 1
+fi
+
+c "Ray WORKER $VLLM_HOST_IP -> head $HEAD_NODE_IP (iface $MN_IF_NAME)"
+
 cd ~
-bash ~/run_cluster.sh "$VLLM_IMAGE" "$HEAD_NODE_IP" --worker ~/.cache/huggingface \
-  -v "$HOME/nemotron-super/super_v3_reasoning_parser.py:/app/super_v3_reasoning_parser.py:ro" \
+bash ~/run_cluster.sh "$VLLM_IMAGE" "$HEAD_NODE_IP" --worker "$HF_CACHE" \
+  ${PARSER_FILE:+-v "$PARSER_FILE:/app/super_v3_reasoning_parser.py:ro"} \
   -e VLLM_HOST_IP="$VLLM_HOST_IP" \
   -e UCX_NET_DEVICES="$MN_IF_NAME" \
   -e NCCL_SOCKET_IFNAME="$MN_IF_NAME" \
