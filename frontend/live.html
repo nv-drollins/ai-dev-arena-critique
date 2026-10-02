@@ -58,11 +58,19 @@ const HOST = location.hostname;
 let CHALLENGE = (params.get('challenge') || '').toUpperCase();
 async function resolveSession(){
   if (SID && CHALLENGE) return SID;
+  // An explicit ?session_id= is authoritative: ask THAT session for its
+  // challenge. Consulting /api/running-session first would label the page with
+  // whatever ran most recently (e.g. reviewing session A but showing "D").
+  if (SID && !CHALLENGE){
+    try{ const r2 = await fetch('/api/session/'+SID); const s = await r2.json();
+      if (s.challenge_id) CHALLENGE = String(s.challenge_id).toUpperCase(); }catch(e){}
+    if (CHALLENGE) return SID;
+  }
   try{ const r = await fetch('/api/running-session'); const d = await r.json();
     if (d.session_id) { SID = SID || d.session_id; }
     if (d.challenge_id) { CHALLENGE = CHALLENGE || String(d.challenge_id).toUpperCase(); }
   }catch(e){}
-  // if we have a session_id but no challenge, ask the session directly
+  // still nothing? resolve from whatever session we ended up with
   if (SID && !CHALLENGE){
     try{ const r2 = await fetch('/api/session/'+SID); const s = await r2.json();
       if (s.challenge_id) CHALLENGE = String(s.challenge_id).toUpperCase(); }catch(e){}

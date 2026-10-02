@@ -591,7 +591,11 @@ function onSessionReady(s) {
   };
 }
 
-/* ---- auto-discover running session ---- */
+/* ---- auto-discover running session ----
+   Keep polling for the LIFETIME of the page. Clearing the interval after the
+   first attach meant a display left open (a booth screen, a recording tab)
+   showed the FIRST run's result forever -- every later run looked stale/wrong.
+   We re-attach whenever a different session appears. */
 async function discover() {
   try {
     const r = await fetch('/api/running-session');
@@ -600,7 +604,6 @@ async function discover() {
     if (d.session_id && d.status && sid !== d.session_id) {
       sid = d.session_id;
       await loadSession();
-      if (window._discInterval) { clearInterval(window._discInterval); window._discInterval = null; }
     }
   } catch {}
 }
@@ -621,7 +624,9 @@ if (typeof BroadcastChannel !== 'undefined') {
     const _bc = new BroadcastChannel('arena_notify');
     _bc.onmessage = (e) => {
       const d = e.data || {};
-      if (d.session && d.session !== sid) { sid = d.session; loadSession(); if (window._discInterval) { clearInterval(window._discInterval); window._discInterval = null; } }
+      // NOTE: do NOT clear _discInterval here -- polling must survive so the
+      // next run re-attaches (see discover()).
+      if (d.session && d.session !== sid) { sid = d.session; loadSession(); }
     };
   } catch (e) {}
 }
@@ -630,8 +635,7 @@ try {
   window.addEventListener('storage', e => {
     if (e.key === 'arena_session' && e.newValue) {
       sid = e.newValue;
-      loadSession();
-      if (window._discInterval) { clearInterval(window._discInterval); window._discInterval = null; }
+      loadSession();   // keep _discInterval alive so later runs still attach
     }
   });
 } catch {}
