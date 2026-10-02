@@ -73,13 +73,36 @@ _launch_critic() {
   _wait_served "$HEAD_SSH" "$CRITIC_PORT" "critic"
 }
 _wait_served() {  # $1 ssh, $2 port, $3 label
-  local i cur
-  for i in $(seq 1 $((MODEL_READY_TIMEOUT/6))); do
+  local i=0 cur prev_sz=0 sz
+  local max=$((MODEL_READY_TIMEOUT/6))
+  while [ "$i" -lt "$max" ]; do
+    i=$((i+1))
     cur=$(served_on "$1" "$2")
     [ -n "$cur" ] && { ok "$3 ready: $cur ($((i*6))s)"; return 0; }
-    c "waiting for $3 … ($((i*6))s/${MODEL_READY_TIMEOUT}s)"; sleep 6
+
+    # A first-ever launch on a node legitimately exceeds any fixed timeout: vLLM
+    # downloads the weights to EVERY rank before it can serve (a 70B is ~132GB,
+    # minutes even on a fast link). Dying at a fixed deadline while the HF cache
+    # is visibly growing reports a WORKING cold start as a failure. So: while the
+    # cache keeps growing, extend the deadline and say what's actually happening.
+    sz=$("${SSH[@]}" "$1" 'du -sb ~/.cache/huggingface 2>/dev/null | cut -f1' 2>/dev/null)
+    sz=${sz:-0}
+    if [ "${sz:-0}" -gt "${prev_sz:-0}" ] 2>/dev/null; then
+      if [ "$prev_sz" -gt 0 ] 2>/dev/null; then
+        c "waiting for $3 … ($((i*6))s) — downloading weights, cache $((sz/1073741824))GB (+$(( (sz-prev_sz)/1048576 ))MB)"
+        max=$((i + 20))       # keep ~2 more minutes of runway while it progresses
+      fi
+      prev_sz=$sz
+      sleep 6; continue
+    fi
+
+    c "waiting for $3 … ($((i*6))s/$((max*6))s)"
+    sleep 6
   done
-  err "$3 did not become ready in ${MODEL_READY_TIMEOUT}s (logs: critiquectl.sh logs $3)"; return 1
+  err "$3 did not become ready in $((max*6))s and its HF cache stopped growing."
+  err "  check: bash bin/critiquectl.sh logs $3"
+  err "  if it IS still loading, re-run 'critiquectl.sh start' — it skips what's already up."
+  return 1
 }
 
 # ---- stop (clean SIGTERM so GPUs release back to Ray) ----------------------
