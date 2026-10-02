@@ -16,9 +16,17 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=bin/arena.conf
 . "$HERE/arena.conf"
 
+arena_require_roster || exit 1
+
 SSH=(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 -o BatchMode=yes)
 HEAD_SSH="${SPARK_HEAD##*=}"           # user@host, from bin/arena.conf
-WRITER_SSH="nvidia@${WRITER_HOST_SPARK}"
+# Reuse the worker's configured SSH user rather than assuming "nvidia".
+_w="${SPARK_WORKERS%% *}"; _w="${_w##*=}"      # user@host
+WRITER_SSH="${WRITER_SSH:-$_w}"
+
+# Where the repo is checked out on the remote nodes. Override ARENA_DIR if you
+# clone it somewhere else (it is NOT always named after the repo).
+ARENA_DIR="${ARENA_DIR:-~/ai-dev-arena}"
 
 on_head()   { "${SSH[@]}" "$HEAD_SSH" "$@"; }
 on_writer() { "${SSH[@]}" "$WRITER_SSH" "$@"; }
@@ -51,7 +59,7 @@ _launch_writer() {
   # need the Ray container. launch-writer.sh ssh-hops to WRITER_HOST_SPARK itself.
   if [ -n "$(served_on "$WRITER_SSH" "$WRITER_PORT")" ]; then ok "writer already serving — skip"; return 0; fi
   c "launching WRITER ($WRITER_SERVED, TP=1, own v0.27.1 container) on $WRITER_HOST_SPARK…"
-  on_writer "cd ~/ai-dev-arena-critique && tmux kill-session -t writer 2>/dev/null; \
+  on_writer "cd $ARENA_DIR && tmux kill-session -t writer 2>/dev/null; \
     tmux new-session -d -s writer 'WRITER_HOST_SPARK=$WRITER_HOST_SPARK bash bin/launch-writer.sh 2>&1 | tee ~/writer.log; sleep 86400'"
   _wait_served "$WRITER_SSH" "$WRITER_PORT" "writer"
 }
@@ -60,7 +68,7 @@ _launch_critic() {
   [ -n "$box" ] || { err "no Ray container on head — start the cluster first"; return 1; }
   if [ -n "$(served_on "$HEAD_SSH" "$CRITIC_PORT")" ]; then ok "critic already serving — skip"; return 0; fi
   c "launching CRITIC ($CRITIC_SERVED, TP=$CRITIC_TP across both Sparks)… (2–5 min load)"
-  on_head "cd ~/ai-dev-arena-critique && tmux kill-session -t critic 2>/dev/null; \
+  on_head "cd $ARENA_DIR && tmux kill-session -t critic 2>/dev/null; \
     tmux new-session -d -s critic 'bash bin/launch-critic.sh 2>&1 | tee ~/critic.log; sleep 86400'"
   _wait_served "$HEAD_SSH" "$CRITIC_PORT" "critic"
 }
@@ -92,7 +100,7 @@ _stop_writer() {  # writer is its OWN container (arena-writer) on WRITER_HOST_SP
 # ---- orchestrator with critic enabled --------------------------------------
 _start_orch() {
   c "starting orchestrator with CRITIC_ENABLED=1 (writer→critic pipeline)…"
-  on_head "cd ~/ai-dev-arena-critique && fuser -k $ORCH_PORT/tcp >/dev/null 2>&1; sleep 2; \
+  on_head "cd $ARENA_DIR && fuser -k $ORCH_PORT/tcp >/dev/null 2>&1; sleep 2; \
     WRITER_URL=http://$WRITER_HOST_SPARK:$WRITER_PORT WRITER_MODEL=$WRITER_SERVED \
     CRITIC_URL=http://localhost:$CRITIC_PORT CRITIC_MODEL=$CRITIC_SERVED \
     CRITIC_ENABLED=1 \
