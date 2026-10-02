@@ -98,15 +98,23 @@ _stop_writer() {  # writer is its OWN container (arena-writer) on WRITER_HOST_SP
 }
 
 # ---- orchestrator with critic enabled --------------------------------------
+# Delegates to bin/restart-orch.sh so there is ONE place that knows how to start
+# the orchestrator. That script also builds SPARK_NODES_JSON from the configured
+# roster -- without it the cluster panel only ever shows the head node, which
+# silently breaks the "both Sparks light up" moment the demo is built around.
 _start_orch() {
   c "starting orchestrator with CRITIC_ENABLED=1 (writer→critic pipeline)…"
-  on_head "cd $ARENA_DIR && fuser -k $ORCH_PORT/tcp >/dev/null 2>&1; sleep 2; \
-    WRITER_URL=http://$WRITER_HOST_SPARK:$WRITER_PORT WRITER_MODEL=$WRITER_SERVED \
-    CRITIC_URL=http://localhost:$CRITIC_PORT CRITIC_MODEL=$CRITIC_SERVED \
-    CRITIC_ENABLED=1 \
-    nohup .venv/bin/uvicorn orchestrator.main:app --host 0.0.0.0 --port $ORCH_PORT \
-      >> ~/uvicorn.log 2>&1 & disown; sleep 4; curl -s http://localhost:$ORCH_PORT/ | head -c 40" >/dev/null
-  ok "orchestrator up (critic enabled)"
+  on_head "cd $ARENA_DIR && bash bin/restart-orch.sh" >/dev/null 2>&1
+  # confirm the roster actually made it through
+  local n
+  n=$(on_head "curl -s -m6 http://localhost:$ORCH_PORT/api/telemetry" 2>/dev/null \
+      | grep -o '\"role\"' | wc -l)
+  if [ "${n:-0}" -ge 2 ]; then
+    ok "orchestrator up (critic enabled, $n nodes in cluster panel)"
+  else
+    warn "orchestrator up but telemetry shows ${n:-0} node(s) — the cluster panel"
+    warn "  will not show both Sparks. Check SPARK_WORKERS in bin/arena.conf.local."
+  fi
 }
 
 cmd_logs() {
